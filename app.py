@@ -382,32 +382,188 @@ def generate_strategy(
 
 def strategy_daily(df):
     """
-    Daily trading strategy (short term)
+    Daily trading strategy (momentum & volume driven)
     """
-    return generate_strategy(
-        df=df,
-        window=30,
-        mode_name="HARIAN"
+    rows = []
+
+    for symbol in df["Symbol"].unique():
+        d_all = df[df["Symbol"] == symbol].sort_values("Tanggal Perdagangan Terakhir")
+
+        # Adaptive window (daily)
+        window = min(30, len(d_all))
+        d = d_all.tail(window)
+
+        if len(d) < 15:
+            continue
+
+        # =========================
+        # INDICATORS
+        # =========================
+        d = d.copy()
+        d["EMA10"] = compute_ema(d["Close"], 10)
+        d["EMA20"] = compute_ema(d["Close"], 20)
+        d["RSI"] = compute_rsi(d["Close"])
+        d["VOL_MED20"] = d["Volume"].rolling(20).median()
+
+        latest = d.iloc[-1]
+
+        # =========================
+        # DAILY LOGIC
+        # =========================
+        trend_ok = latest["EMA10"] > latest["EMA20"]
+        momentum_ok = 45 <= latest["RSI"] <= 70
+        volume_ok = latest["Volume"] > latest["VOL_MED20"]
+        price_ok = latest["Close"] > latest["EMA10"]
+
+        daily_score = sum([
+            trend_ok * 30,
+            momentum_ok * 25,
+            volume_ok * 25,
+            price_ok * 20
+        ])  # max 100
+
+        # =========================
+        # AI SCORE (MASTER FILTER)
+        # =========================
+        ai_score = compute_ai_score(d)
+
+        final_score = int(0.6 * ai_score + 0.4 * daily_score)
+
+        # =========================
+        # ENTRY FILTER
+        # =========================
+        if final_score >= 60 and latest["Bandar"] != "DISTRIBUSI":
+            rows.append({
+                "Mode": "HARIAN",
+                "Saham": symbol,
+                "Harga": round(latest["Close"], 0),
+                "Support": round(latest["Support"], 0),
+                "Resistance": round(latest["Resistance"], 0),
+                "AI Score": ai_score,
+                "Daily Score": daily_score,
+                "Final Score": final_score,
+                "Bandar": latest["Bandar"],
+                "Status": "BUY" if final_score >= 75 else "WATCH"
+            })
+
+    return (
+        pd.DataFrame(rows)
+        .sort_values("Final Score", ascending=False)
+        .reset_index(drop=True)
+        if rows else pd.DataFrame()
     )
+
 
 def strategy_weekly(df):
     """
-    Swing weekly strategy
+    Swing weekly strategy (adaptive)
     """
-    return generate_strategy(
-        df=df,
-        window=120,
-        mode_name="MINGGUAN"
+    rows = []
+
+    for symbol in df["Symbol"].unique():
+        d_all = df[df["Symbol"] == symbol]
+        window = min(120, len(d_all))  # adaptif
+        d = d_all.tail(window)
+
+        if len(d) < 50:
+            continue
+
+        score = compute_ai_score(d)
+        latest = d.iloc[-1]
+
+        if score >= 60:
+            rows.append({
+                "Mode": "MINGGUAN",
+                "Saham": symbol,
+                "Harga": round(latest["Close"], 0),
+                "Support": round(latest["Support"], 0),
+                "Resistance": round(latest["Resistance"], 0),
+                "AI Score": score,
+                "Bandar": latest["Bandar"],
+                "Status": "BUY" if score >= 75 else "WATCH"
+            })
+
+    return (
+        pd.DataFrame(rows)
+        .sort_values("AI Score", ascending=False)
+        .reset_index(drop=True)
+        if rows else pd.DataFrame()
     )
+
 
 def strategy_monthly(df):
     """
-    Position trading (monthly)
+    Position trading (long term / investor grade) – stable version
     """
-    return generate_strategy(
-        df=df,
-        window=250,
-        mode_name="BULANAN"
+    rows = []
+
+    for symbol in df["Symbol"].unique():
+        d_all = df[df["Symbol"] == symbol].sort_values("Tanggal Perdagangan Terakhir")
+
+        # Adaptive window
+        window = min(250, len(d_all))
+        d = d_all.tail(window)
+
+        if len(d) < 100:   # relax: ±5 bulan data
+            continue
+
+        # =========================
+        # INDICATORS
+        # =========================
+        d = d.copy()
+        d["EMA50"] = compute_ema(d["Close"], 50)
+        d["EMA200"] = compute_ema(d["Close"], 200)
+        d["RSI"] = compute_rsi(d["Close"])
+        d["VOL_MED50"] = d["Volume"].rolling(50).median()
+
+        latest = d.iloc[-1]
+
+        # =========================
+        # MONTHLY LOGIC (RELAXED)
+        # =========================
+        trend_ok = latest["EMA50"] >= latest["EMA200"] * 0.98
+        price_ok = latest["Close"] >= latest["EMA50"] * 0.98
+        momentum_ok = 40 <= latest["RSI"] <= 70
+        volume_ok = latest["Volume"] >= latest["VOL_MED50"] * 0.8
+        bandar_ok = latest["Bandar"] != "DISTRIBUSI"
+
+        monthly_score = sum([
+            trend_ok * 30,
+            price_ok * 20,
+            momentum_ok * 20,
+            volume_ok * 15,
+            bandar_ok * 15
+        ])  # max 100
+
+        # =========================
+        # AI SCORE (MASTER FILTER)
+        # =========================
+        ai_score = compute_ai_score(d)
+
+        final_score = int(0.65 * ai_score + 0.35 * monthly_score)
+
+        # =========================
+        # ENTRY FILTER
+        # =========================
+        if final_score >= 60 and bandar_ok:
+            rows.append({
+                "Mode": "BULANAN",
+                "Saham": symbol,
+                "Harga": round(latest["Close"], 0),
+                "Support": round(latest["Support"], 0),
+                "Resistance": round(latest["Resistance"], 0),
+                "AI Score": ai_score,
+                "Monthly Score": monthly_score,
+                "Final Score": final_score,
+                "Bandar": latest["Bandar"],
+                "Status": "BUY" if final_score >= 75 else "WATCH"
+            })
+
+    return (
+        pd.DataFrame(rows)
+        .sort_values("Final Score", ascending=False)
+        .reset_index(drop=True)
+        if rows else pd.DataFrame()
     )
 
 # ============================================================
@@ -714,9 +870,59 @@ if menu == "🏠 Dashboard":
 # ============================================================
 
 elif menu == "📅 Rekomendasi Harian":
-    st.subheader("📅 Rekomendasi Harian")
+
+    st.subheader("📅 Rekomendasi Harian (Daily Trading)")
+
+    st.caption("""
+    📌 Strategi berbasis **momentum harian**, **volume**, dan **AI Score**  
+    Cocok untuk holding **1–5 hari**
+    """)
+
     daily_df = strategy_daily(df)
-    st.dataframe(daily_df, use_container_width=True)
+
+    # =========================
+    # EMPTY STATE (WAJIB)
+    # =========================
+    if daily_df.empty:
+        st.warning("⚠️ Tidak ada saham yang memenuhi kriteria hari ini.")
+        st.info("""
+        **Kemungkinan penyebab:**
+        - Market sedang sideways
+        - Volume belum masuk
+        - RSI overbought / oversold
+        - Bandar distribusi
+
+        👉 Gunakan **Watchlist** atau **Ranking Harian** untuk alternatif.
+        """)
+    else:
+        # =========================
+        # KPI RINGKAS
+        # =========================
+        c1, c2, c3 = st.columns(3)
+
+        c1.metric("Total Kandidat", len(daily_df))
+        c2.metric("Rata-rata AI Score", int(daily_df["AI Score"].mean()))
+        c3.metric("Rata-rata Final Score", int(daily_df["Final Score"].mean()))
+
+        st.markdown("---")
+
+        # =========================
+        # DATAFRAME
+        # =========================
+        st.dataframe(
+            daily_df,
+            use_container_width=True,
+            hide_index=True
+        )
+
+        # =========================
+        # KETERANGAN STATUS
+        # =========================
+        st.caption("""
+        **Keterangan Status:**
+        - 🟢 **BUY** → momentum kuat + konfirmasi AI
+        - 🟡 **WATCH** → momentum ada, tunggu pullback
+        """)
 
 # ============================================================
 # SWING MINGGUAN
@@ -724,17 +930,93 @@ elif menu == "📅 Rekomendasi Harian":
 
 elif menu == "📊 Swing Mingguan":
     st.subheader("📊 Swing Mingguan")
+
     weekly_df = strategy_weekly(df)
-    st.dataframe(weekly_df, use_container_width=True)
+
+    if weekly_df.empty:
+        st.warning("⚠️ Belum ada saham yang memenuhi kriteria Swing Mingguan.")
+        st.info("""
+        **Kemungkinan penyebab:**
+        - Data historis belum cukup panjang
+        - AI Score belum mencapai threshold
+        - Bandar belum terdeteksi AKUMULASI
+
+        👉 Coba:
+        - Turunkan threshold AI
+        - Gunakan Watchlist / Ranking Harian
+        """)
+    else:
+        st.dataframe(weekly_df, use_container_width=True)
+
 
 # ============================================================
 # BULANAN
 # ============================================================
 
 elif menu == "🗓️ Rekomendasi Bulanan":
-    st.subheader("🗓️ Rekomendasi Bulanan")
+
+    st.subheader("🗓️ Rekomendasi Bulanan (Position Trading)")
+
+    st.caption("""
+    📌 Strategi **position trading** berbasis **trend jangka panjang**,  
+    **akumulasi bandar**, dan **AI Score tinggi**  
+    Cocok untuk holding **1–6 bulan**
+    """)
+
     monthly_df = strategy_monthly(df)
-    st.dataframe(monthly_df, use_container_width=True)
+
+    # =========================
+    # EMPTY STATE
+    # =========================
+    if monthly_df.empty:
+        st.warning("⚠️ Belum ada saham dengan setup bulanan ideal.")
+        st.info("""
+        **Penyebab umum:**
+        - Trend besar belum terbentuk
+        - Bandar masih distribusi
+        - Harga masih di area konsolidasi
+
+        👉 Gunakan **Watchlist** untuk observasi lebih awal.
+        """)
+    else:
+        # =========================
+        # KPI RINGKAS
+        # =========================
+        c1, c2, c3 = st.columns(3)
+
+        c1.metric("Total Kandidat", len(monthly_df))
+        c2.metric("AI Score Tertinggi", monthly_df["AI Score"].max())
+        c3.metric("Rata-rata AI Score", int(monthly_df["AI Score"].mean()))
+
+        st.markdown("---")
+
+        # =========================
+        # DATA UTAMA
+        # =========================
+        st.dataframe(
+            monthly_df,
+            use_container_width=True,
+            hide_index=True
+        )
+
+        # =========================
+        # PRIORITAS HOLD
+        # =========================
+        strong_df = monthly_df[monthly_df["Status"] == "BUY"]
+
+        if not strong_df.empty:
+            st.markdown("### 🟢 Prioritas Hold Bulanan")
+            st.dataframe(strong_df, use_container_width=True)
+
+        # =========================
+        # CATATAN STRATEGI
+        # =========================
+        st.caption("""
+        **Catatan:**
+        - 🟢 **BUY** → trend mayor + akumulasi kuat
+        - 🟡 **WATCH** → valid tapi tunggu konfirmasi breakout
+        - Disarankan **evaluasi ulang setiap akhir bulan**
+        """)
 
 # ============================================================
 # WATCHLIST
