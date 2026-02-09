@@ -386,6 +386,40 @@ def ml_decision(conf, high=0.70, mid=0.55):
 
 
 # ============================================================
+# FINAL DECISION ENGINE (AI + ML)
+# ============================================================
+
+def final_decision_engine(
+    ai_score: float,
+    ml_conf: float | None
+):
+    """
+    Combine AI Score & ML Confidence into FINAL decision
+    """
+
+    # Jika ML belum ada
+    if ml_conf is None or pd.isna(ml_conf):
+        if ai_score >= 75:
+            return "STRONG BUY"
+        elif ai_score >= 60:
+            return "BUY / WATCH"
+        else:
+            return "WAIT"
+
+    ml_score = ml_conf * 100
+    final_score = 0.6 * ai_score + 0.4 * ml_score
+
+    if ai_score >= 75 and ml_score >= 70:
+        return "STRONG BUY"
+    elif ai_score >= 60 and ml_score >= 60:
+        return "BUY / WATCH"
+    elif final_score >= 55:
+        return "WATCH"
+    else:
+        return "WAIT"
+
+
+# ============================================================
 # STRATEGY BASE ENGINE
 # ============================================================
 
@@ -644,24 +678,53 @@ def strategy_monthly(df):
 
 def generate_watchlist(df):
     """
-    Watchlist berbasis:
-    - Bandar AKUMULASI
-    - AI Score >= 50
+    Watchlist berbasis AI + ML (Early Radar)
+    - BUKAN BUY SIGNAL
+    - Calon setup sebelum masuk rekomendasi
     """
+
     rows = []
 
     for symbol in df["Symbol"].unique():
-        d = df[df["Symbol"] == symbol].tail(120)
-        score = compute_ai_score(d)
+        d = (
+            df[df["Symbol"] == symbol]
+            .sort_values("Tanggal Perdagangan Terakhir")
+            .tail(120)
+        )
+
+        if d.empty:
+            continue
+
         latest = d.iloc[-1]
 
-        if latest["Bandar"] == "AKUMULASI" and score >= 50:
+        # =========================
+        # AI + ML
+        # =========================
+        ai_score = compute_ai_score(d)
+        ml_conf = latest.get("ml_confidence_label_daily", np.nan)
+        ml_signal = ml_decision(ml_conf)
+
+        final_decision = final_decision_engine(ai_score, ml_conf)
+
+        # =========================
+        # WATCHLIST FILTER (FIX)
+        # =========================
+        if (
+            latest["Bandar"] == "AKUMULASI"
+            and 50 <= ai_score < 75
+            and final_decision in ["WATCH", "BUY / WATCH"]
+            and ml_signal in ["WATCH_ML", "BUY_ML", "NO_ML"]
+        ):
             rows.append({
                 "Saham": symbol,
                 "Harga": round(latest["Close"], 0),
                 "Support": round(latest["Support"], 0),
                 "Resistance": round(latest["Resistance"], 0),
-                "AI Score": score
+                "AI Score": ai_score,
+                "ML Confidence": round(ml_conf, 3) if not pd.isna(ml_conf) else None,
+                "ML Signal": ml_signal,
+                "Final Decision": final_decision,
+                "Bandar": latest["Bandar"]
             })
 
     if not rows:
@@ -669,9 +732,13 @@ def generate_watchlist(df):
 
     return (
         pd.DataFrame(rows)
-        .sort_values("AI Score", ascending=False)
+        .sort_values(
+            ["AI Score", "ML Confidence"],
+            ascending=[False, False]
+        )
         .reset_index(drop=True)
     )
+
 
 # ============================================================
 # HEATMAP CARD ENGINE
@@ -679,8 +746,7 @@ def generate_watchlist(df):
 
 def heatmap_cards(df):
     """
-    Card heatmap:
-    STRONG BUY | BUY / WATCH | WAIT
+    Card heatmap berbasis FINAL DECISION (AI + ML)
     """
     cards = {
         "STRONG BUY": [],
@@ -690,17 +756,24 @@ def heatmap_cards(df):
 
     for symbol in df["Symbol"].unique():
         d = df[df["Symbol"] == symbol].tail(120)
-        score = compute_ai_score(d)
+        if d.empty:
+            continue
+
+        ai_score = compute_ai_score(d)
         latest = d.iloc[-1]
 
-        if latest["Bandar"] == "AKUMULASI" and score >= 75:
-            cards["STRONG BUY"].append((symbol, score))
-        elif latest["Bandar"] == "AKUMULASI" and score >= 60:
-            cards["BUY / WATCH"].append((symbol, score))
+        ml_conf = latest.get("ml_confidence_label_daily", None)
+        decision = final_decision_engine(ai_score, ml_conf)
+
+        if decision == "STRONG BUY":
+            cards["STRONG BUY"].append((symbol, ai_score, ml_conf))
+        elif decision == "BUY / WATCH":
+            cards["BUY / WATCH"].append((symbol, ai_score, ml_conf))
         else:
-            cards["WAIT"].append((symbol, score))
+            cards["WAIT"].append((symbol, ai_score, ml_conf))
 
     return cards
+
 
 # ============================================================
 # HEATMAP MATRIX ENGINE (CONFIDENCE × VOLUME)
@@ -754,36 +827,37 @@ def heatmap_matrix_engine(df):
 # ============================================================
 
 def auto_ranking(df, top_n=5):
-    """
-    Ranking saham terbaik harian
-    """
     rows = []
 
     for symbol in df["Symbol"].unique():
         d = df[df["Symbol"] == symbol].tail(200)
-        score = compute_ai_score(d)
+        if d.empty:
+            continue
+
+        ai_score = compute_ai_score(d)
         latest = d.iloc[-1]
+        ml_conf = latest.get("ml_confidence_label_daily", None)
 
-        rows.append({
-            "Saham": symbol,
-            "AI Score": score,
-            "Harga": round(latest["Close"], 0),
-            "Bandar": latest["Bandar"]
-        })
+        decision = final_decision_engine(ai_score, ml_conf)
 
-    rank_df = pd.DataFrame(rows)
-
-    rank_df = rank_df[
-        (rank_df["Bandar"] == "AKUMULASI") &
-        (rank_df["AI Score"] >= 60)
-    ]
+        if decision in ["STRONG BUY", "BUY / WATCH"]:
+            rows.append({
+                "Saham": symbol,
+                "Decision": decision,
+                "AI Score": ai_score,
+                "ML": round(ml_conf, 3) if ml_conf else None,
+                "Harga": round(latest["Close"], 0),
+                "Bandar": latest["Bandar"]
+            })
 
     return (
-        rank_df
-        .sort_values("AI Score", ascending=False)
+        pd.DataFrame(rows)
+        .sort_values(["Decision", "AI Score"], ascending=[True, False])
         .head(top_n)
         .reset_index(drop=True)
+        if rows else pd.DataFrame()
     )
+
 
 # ============================================================
 # SIDEBAR NAVIGATION (FULL)
@@ -897,43 +971,47 @@ if menu == "🏠 Dashboard":
     col1, col2, col3 = st.columns(3)
 
     with col1:
-        st.markdown("#### 🟢 STRONG BUY")
-        for s, sc in cards["STRONG BUY"][:8]:
+        st.markdown("### 🟢 STRONG BUY")
+        for s, sc, ml in cards["STRONG BUY"][:8]:
             st.markdown(
                 f"""
                 <div class="card card-strong">
                     {s}<br>
-                    <span>Score: {sc}</span>
+                    <span>AI: {sc} | ML: {round(ml,2) if ml else 'NA'}</span>
                 </div>
                 """,
                 unsafe_allow_html=True
             )
 
     with col2:
-        st.markdown("#### 🟩 BUY / WATCH")
-        for s, sc in cards["BUY / WATCH"][:8]:
+        st.markdown("### 🟩 BUY / WATCH")
+        for s, sc, ml in cards["BUY / WATCH"][:8]:
             st.markdown(
                 f"""
                 <div class="card card-mid">
                     {s}<br>
-                    <span>Score: {sc}</span>
+                    <span>AI: {sc} | ML: {round(ml,2) if ml else 'NA'}</span>
                 </div>
                 """,
                 unsafe_allow_html=True
             )
 
     with col3:
-        st.markdown("#### ⚪ WAIT")
-        for s, sc in cards["WAIT"][:8]:
+        st.markdown("### ⚪ WAIT")
+        for s, sc, ml in cards["WAIT"][:8]:
             st.markdown(
                 f"""
                 <div class="card card-low">
                     {s}<br>
-                    <span>Score: {sc}</span>
+                    <span>AI: {sc} | ML: {round(ml,2) if ml else 'NA'}</span>
                 </div>
                 """,
                 unsafe_allow_html=True
             )
+
+
+
+
 
     st.markdown("</div>", unsafe_allow_html=True)
 
@@ -1258,26 +1336,36 @@ def auto_alert_scheduler(df):
     # =====================
     # SIGNAL BOX
     # =====================
-    if ai >= 75 and latest["Bandar"] == "AKUMULASI":
+    ml_conf = latest.get("ml_confidence_label_daily", None)
+    decision = final_decision_engine(ai, ml_conf)
+
+    if decision == "STRONG BUY":
         st.markdown(
             f"<div class='card card-strong'>"
             f"🟢 STRONG BUY<br>"
+            f"AI: {ai} | ML: {round(ml_conf,2) if ml_conf else 'NA'}<br>"
             f"Entry: {latest['Close']:.0f}<br>"
             f"Target: {(latest['Close']*1.07):.0f}<br>"
             f"Stoploss: {(latest['Close']*0.95):.0f}"
             f"</div>",
             unsafe_allow_html=True
         )
-    elif ai >= 60:
+
+    elif decision in ["BUY / WATCH", "WATCH"]:
         st.markdown(
-            f"<div class='card card-mid'>🟩 BUY / WATCH</div>",
+            f"<div class='card card-mid'>"
+            f"🟩 BUY / WATCH<br>"
+            f"AI: {ai} | ML: {round(ml_conf,2) if ml_conf else 'NA'}"
+            f"</div>",
             unsafe_allow_html=True
         )
+
     else:
         st.markdown(
             f"<div class='card card-low'>⚪ WAIT</div>",
             unsafe_allow_html=True
         )
+
 
     # =====================
     # CANDLESTICK CHART
