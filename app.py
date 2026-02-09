@@ -37,165 +37,28 @@ st.set_page_config(
 # GLOBAL THEME – ELEGANT GREEN TERMINAL
 # ============================================================
 
-st.markdown("""
-<style>
-
-/* =====================================================
-   SIDENAVBAR (HIJAU GRADIENT - FIX)
-===================================================== */
-section[data-testid="stSidebar"] {
-    background: linear-gradient(180deg, #0b3d2e, #1b5e20);
-}
-
-section[data-testid="stSidebar"] * {
-    color: #ffffff !important;
-}
-
-/* Divider sidebar */
-section[data-testid="stSidebar"] hr {
-    border-color: rgba(255,255,255,0.25);
-}
-
-/* Sidebar info box */
-section[data-testid="stSidebar"] .stAlert {
-    background: rgba(255,255,255,0.12);
-    border: 1px solid rgba(255,255,255,0.25);
-}
-
-/* Hover menu sidebar */
-section[data-testid="stSidebar"] div[role="radiogroup"] > label:hover {
-    background: rgba(255,255,255,0.12);
-    border-radius: 8px;
-    padding-left: 6px;
-}
-
-/* =====================================================
-   DASHBOARD SECTION (TIDAK KENA SIDEBAR)
-===================================================== */
-.section-box {
-    background: #ffffff;
-    padding: 22px;
-    border-radius: 14px;
-    border: 1px solid #e5e7eb;
-    box-shadow: 0 6px 18px rgba(0,0,0,0.04);
-    margin-bottom: 26px;
-}
-
-/* KPI BOX */
-.kpi-box {
-    background: #ffffff;
-    padding: 18px;
-    border-radius: 12px;
-    border: 1px solid #e5e7eb;
-    box-shadow: 0 4px 12px rgba(0,0,0,0.04);
-}
-
-.kpi-title {
-    font-size: 14px;
-    color: #6b7280;
-    margin-bottom: 6px;
-}
-
-.kpi-value {
-    font-size: 32px;
-    font-weight: 700;
-    color: #111827;
-}
-
-/* INFO BAR */
-.info-bar {
-    background: #eef6ff;
-    padding: 12px 16px;
-    border-radius: 10px;
-    font-weight: 500;
-    color: #1d4ed8;
-    margin-bottom: 18px;
-}
-
-/* =====================================================
-   HEATMAP CARD
-===================================================== */
-.card {
-    padding: 14px 16px;
-    margin-bottom: 10px;
-    border-radius: 10px;
-    font-weight: 600;
-    font-size: 14px;
-    transition: all 0.25s ease;
-}
-
-/* STRONG BUY */
-.card-strong {
-    color: #0f5132;
-    background: rgba(25, 135, 84, 0.22);
-    border: 1px solid rgba(25, 135, 84, 0.45);
-}
-.card-strong:hover {
-    box-shadow: 0 0 14px rgba(25, 135, 84, 0.45);
-    transform: translateY(-2px);
-}
-
-/* BUY / WATCH */
-.card-mid {
-    color: #146c43;
-    background: rgba(25, 135, 84, 0.14);
-    border: 1px solid rgba(25, 135, 84, 0.28);
-}
-.card-mid:hover {
-    box-shadow: 0 0 12px rgba(25, 135, 84, 0.30);
-    transform: translateY(-2px);
-}
-
-/* WAIT */
-.card-low {
-    color: #495057;
-    background: rgba(108, 117, 125, 0.15);
-    border: 1px solid rgba(108, 117, 125, 0.35);
-}
-.card-low:hover {
-    box-shadow: 0 0 10px rgba(108, 117, 125, 0.35);
-    transform: translateY(-2px);
-}
-
-.card span {
-    font-size: 12px;
-    font-weight: 500;
-}
-
-</style>
-""", unsafe_allow_html=True)
+#style/css
+with open("assets/style.css") as f:
+    st.markdown(f"<style>{f.read()}</style>", unsafe_allow_html=True)
 
 
 # ============================================================
-# HEADER
+# DASHBOARD HEADER (MAIN CONTENT)
 # ============================================================
 
 st.markdown("""
-<style>
-.enterprise-title {
-    font-size: 28px;
-    font-weight: 700;
-    color: #000000;
-    margin-bottom: 2px;
-}
-
-.enterprise-subtitle {
-    font-size: 14px;
-    font-weight: 400;
-    color: #000000;
-    letter-spacing: 0.5px;
-    margin-bottom: 12px;
-}
-</style>
-
-<div class="enterprise-title">
-    📊 SahamAI Enterprise
+<div class="app-header">
+    <div class="app-header-left">
+        <div class="app-badge">📊 AI SYSTEM</div>
+        <div class="app-title">SahamAI Enterprise</div>
+        <div class="app-subtitle">
+            Daily • Weekly • Monthly • Score • Backtest • Heatmap
+        </div>
+    </div>
 </div>
-<div class="enterprise-subtitle">
-    Daily • Weekly • Monthly • Score • Backtest • Heatmap
-</div>
-<hr>
+<hr class="app-divider">
 """, unsafe_allow_html=True)
+
 
 # ============================================================
 # PATH CONFIGURATION
@@ -383,40 +246,6 @@ def ml_decision(conf, high=0.70, mid=0.55):
         return "WATCH_ML"
     else:
         return "WAIT_ML"
-
-
-# ============================================================
-# FINAL DECISION ENGINE (AI + ML)
-# ============================================================
-
-def final_decision_engine(
-    ai_score: float,
-    ml_conf: float | None
-):
-    """
-    Combine AI Score & ML Confidence into FINAL decision
-    """
-
-    # Jika ML belum ada
-    if ml_conf is None or pd.isna(ml_conf):
-        if ai_score >= 75:
-            return "STRONG BUY"
-        elif ai_score >= 60:
-            return "BUY / WATCH"
-        else:
-            return "WAIT"
-
-    ml_score = ml_conf * 100
-    final_score = 0.6 * ai_score + 0.4 * ml_score
-
-    if ai_score >= 75 and ml_score >= 70:
-        return "STRONG BUY"
-    elif ai_score >= 60 and ml_score >= 60:
-        return "BUY / WATCH"
-    elif final_score >= 55:
-        return "WATCH"
-    else:
-        return "WAIT"
 
 
 # ============================================================
@@ -678,53 +507,24 @@ def strategy_monthly(df):
 
 def generate_watchlist(df):
     """
-    Watchlist berbasis AI + ML (Early Radar)
-    - BUKAN BUY SIGNAL
-    - Calon setup sebelum masuk rekomendasi
+    Watchlist berbasis:
+    - Bandar AKUMULASI
+    - AI Score >= 50
     """
-
     rows = []
 
     for symbol in df["Symbol"].unique():
-        d = (
-            df[df["Symbol"] == symbol]
-            .sort_values("Tanggal Perdagangan Terakhir")
-            .tail(120)
-        )
-
-        if d.empty:
-            continue
-
+        d = df[df["Symbol"] == symbol].tail(120)
+        score = compute_ai_score(d)
         latest = d.iloc[-1]
 
-        # =========================
-        # AI + ML
-        # =========================
-        ai_score = compute_ai_score(d)
-        ml_conf = latest.get("ml_confidence_label_daily", np.nan)
-        ml_signal = ml_decision(ml_conf)
-
-        final_decision = final_decision_engine(ai_score, ml_conf)
-
-        # =========================
-        # WATCHLIST FILTER (FIX)
-        # =========================
-        if (
-            latest["Bandar"] == "AKUMULASI"
-            and 50 <= ai_score < 75
-            and final_decision in ["WATCH", "BUY / WATCH"]
-            and ml_signal in ["WATCH_ML", "BUY_ML", "NO_ML"]
-        ):
+        if latest["Bandar"] == "AKUMULASI" and score >= 50:
             rows.append({
                 "Saham": symbol,
                 "Harga": round(latest["Close"], 0),
                 "Support": round(latest["Support"], 0),
                 "Resistance": round(latest["Resistance"], 0),
-                "AI Score": ai_score,
-                "ML Confidence": round(ml_conf, 3) if not pd.isna(ml_conf) else None,
-                "ML Signal": ml_signal,
-                "Final Decision": final_decision,
-                "Bandar": latest["Bandar"]
+                "AI Score": score
             })
 
     if not rows:
@@ -732,13 +532,9 @@ def generate_watchlist(df):
 
     return (
         pd.DataFrame(rows)
-        .sort_values(
-            ["AI Score", "ML Confidence"],
-            ascending=[False, False]
-        )
+        .sort_values("AI Score", ascending=False)
         .reset_index(drop=True)
     )
-
 
 # ============================================================
 # HEATMAP CARD ENGINE
@@ -746,7 +542,8 @@ def generate_watchlist(df):
 
 def heatmap_cards(df):
     """
-    Card heatmap berbasis FINAL DECISION (AI + ML)
+    Card heatmap:
+    STRONG BUY | BUY / WATCH | WAIT
     """
     cards = {
         "STRONG BUY": [],
@@ -756,24 +553,17 @@ def heatmap_cards(df):
 
     for symbol in df["Symbol"].unique():
         d = df[df["Symbol"] == symbol].tail(120)
-        if d.empty:
-            continue
-
-        ai_score = compute_ai_score(d)
+        score = compute_ai_score(d)
         latest = d.iloc[-1]
 
-        ml_conf = latest.get("ml_confidence_label_daily", None)
-        decision = final_decision_engine(ai_score, ml_conf)
-
-        if decision == "STRONG BUY":
-            cards["STRONG BUY"].append((symbol, ai_score, ml_conf))
-        elif decision == "BUY / WATCH":
-            cards["BUY / WATCH"].append((symbol, ai_score, ml_conf))
+        if latest["Bandar"] == "AKUMULASI" and score >= 75:
+            cards["STRONG BUY"].append((symbol, score))
+        elif latest["Bandar"] == "AKUMULASI" and score >= 60:
+            cards["BUY / WATCH"].append((symbol, score))
         else:
-            cards["WAIT"].append((symbol, ai_score, ml_conf))
+            cards["WAIT"].append((symbol, score))
 
     return cards
-
 
 # ============================================================
 # HEATMAP MATRIX ENGINE (CONFIDENCE × VOLUME)
@@ -827,57 +617,70 @@ def heatmap_matrix_engine(df):
 # ============================================================
 
 def auto_ranking(df, top_n=5):
+    """
+    Ranking saham terbaik harian
+    """
     rows = []
 
     for symbol in df["Symbol"].unique():
         d = df[df["Symbol"] == symbol].tail(200)
-        if d.empty:
-            continue
-
-        ai_score = compute_ai_score(d)
+        score = compute_ai_score(d)
         latest = d.iloc[-1]
-        ml_conf = latest.get("ml_confidence_label_daily", None)
 
-        decision = final_decision_engine(ai_score, ml_conf)
+        rows.append({
+            "Saham": symbol,
+            "AI Score": score,
+            "Harga": round(latest["Close"], 0),
+            "Bandar": latest["Bandar"]
+        })
 
-        if decision in ["STRONG BUY", "BUY / WATCH"]:
-            rows.append({
-                "Saham": symbol,
-                "Decision": decision,
-                "AI Score": ai_score,
-                "ML": round(ml_conf, 3) if ml_conf else None,
-                "Harga": round(latest["Close"], 0),
-                "Bandar": latest["Bandar"]
-            })
+    rank_df = pd.DataFrame(rows)
+
+    rank_df = rank_df[
+        (rank_df["Bandar"] == "AKUMULASI") &
+        (rank_df["AI Score"] >= 60)
+    ]
 
     return (
-        pd.DataFrame(rows)
-        .sort_values(["Decision", "AI Score"], ascending=[True, False])
+        rank_df
+        .sort_values("AI Score", ascending=False)
         .head(top_n)
         .reset_index(drop=True)
-        if rows else pd.DataFrame()
     )
 
-
 # ============================================================
-# SIDEBAR NAVIGATION (FULL)
+# SIDEBAR LOGO (SIMPLE & CENTER)
 # ============================================================
 
-# =========================
-# SIDEBAR
-# =========================
-# =========================
-# SIDEBAR
-# =========================
-st.sidebar.image(
-    "assets/logo.png",
-    width=200
+st.sidebar.markdown(
+    "<div class='sidebar-logo-wrapper'>",
+    unsafe_allow_html=True
 )
 
-st.sidebar.markdown("## 🧭 Navigasi Sistem")
+st.sidebar.image(
+    "assets/logo.png",
+    width=110
+)
+
+st.sidebar.markdown(
+    "</div>",
+    unsafe_allow_html=True
+)
+
+st.sidebar.markdown(
+    "<div class='sidebar-logo-divider'></div>",
+    unsafe_allow_html=True
+)
+
+
+# ============================================================
+# SIDEBAR NAVIGATION (RADIO STYLED – FINAL)
+# ============================================================
+
+st.sidebar.markdown("### 🧭 Navigasi")
 
 menu = st.sidebar.radio(
-    "Pilih Menu",
+    "Menu Utama",
     [
         "🏠 Dashboard",
         "📅 Rekomendasi Harian",
@@ -885,29 +688,50 @@ menu = st.sidebar.radio(
         "🗓️ Rekomendasi Bulanan",
         "⭐ Watchlist",
         "📊 Heatmap Matrix",
-        "📈 Ranking Harian",
+        "🤖 Ranking Harian",
         "🔍 Analisa 1 Saham"
     ]
 )
 
-st.sidebar.markdown("---")
+# FILTER
+st.sidebar.markdown(
+    "<hr style='border: 0; border-top: 1px solid rgba(255,255,255,0.15); margin: 14px 0;'>",
+    unsafe_allow_html=True
+)
+st.sidebar.markdown("### 🎛️ Filter Tampilan")
 
+selected_timeframe = st.sidebar.selectbox(
+    "⏱ Timeframe",
+    ["Daily", "Weekly", "Monthly"],
+    index=0
+)
+
+selected_limit = st.sidebar.slider(
+    "🔢 Jumlah Saham Ditampilkan",
+    5, 50, 10, 5
+)
+   
+
+# =========================
+# INFO / FOOTER
+# =========================
+st.sidebar.markdown(
+    "<hr style='border: 0; border-top: 1px solid rgba(255,255,255,0.15); margin: 14px 0;'>",
+    unsafe_allow_html=True
+)
 st.sidebar.markdown("""
-### 📌 SahamAI Enterprise
+**SahamAI Enterprise**  
+📊 *AI-powered IDX analytics*
 
-Platform analisis saham terintegrasi  
-untuk **trader & investor aktif**
+🟢 Fokus utama:
+- Rekomendasi saham berbasis AI
+- Heatmap & ranking momentum
+- Analisa teknikal & volume
 
-**Fitur Utama:**
-- 📅 Rekomendasi harian, mingguan & bulanan
-- 📊 Skoring saham berbasis performa
-- 🔥 Heatmap sektor & momentum
-- 📈 Ranking saham paling prospektif
-- 🔔 Monitoring & evaluasi strategi
-
-> **Keputusan lebih cepat.  
-> Risiko lebih terukur.**
+⚠️ *Bukan ajakan beli / jual saham*  
+Gunakan sebagai **alat bantu analisis**
 """)
+
 
 # ============================================================
 # DASHBOARD UI
@@ -920,43 +744,65 @@ if menu == "🏠 Dashboard":
     # ===============================
     st.markdown("""
     <div class="section-box">
-        <h3>📊 Market Overview</h3>
+        <div class="section-header">
+            <div class="section-title">
+                📊 Market Overview
+            </div>
+            <div class="section-subtitle">
+                Ringkasan kondisi pasar & aktivitas bandar hari ini
+            </div>
+        </div>
     """, unsafe_allow_html=True)
 
+    # ===============================
+    # MARKET STATUS BAR
+    # ===============================
     st.markdown(
-        f"<div class='info-bar'>{market_countdown_text()}</div>",
+        f"""
+        <div class="info-bar">
+            {market_countdown_text()}
+        </div>
+        """,
         unsafe_allow_html=True
     )
 
+    # ===============================
+    # KPI DATA
+    # ===============================
     latest_all = df.groupby("Symbol").tail(1)
+
+    total_saham = latest_all.shape[0]
+    total_akumulasi = (latest_all["Bandar"] == "AKUMULASI").sum()
+    total_distribusi = (latest_all["Bandar"] == "DISTRIBUSI").sum()
 
     c1, c2, c3 = st.columns(3)
 
     with c1:
         st.markdown(f"""
-        <div class="kpi-box">
+        <div class="kpi-box kpi-neutral">
             <div class="kpi-title">Total Saham</div>
-            <div class="kpi-value">{latest_all.shape[0]}</div>
+            <div class="kpi-value">{total_saham}</div>
         </div>
         """, unsafe_allow_html=True)
 
     with c2:
         st.markdown(f"""
-        <div class="kpi-box">
+        <div class="kpi-box kpi-positive">
             <div class="kpi-title">Akumulasi</div>
-            <div class="kpi-value">{(latest_all["Bandar"] == "AKUMULASI").sum()}</div>
+            <div class="kpi-value">{total_akumulasi}</div>
         </div>
         """, unsafe_allow_html=True)
 
     with c3:
         st.markdown(f"""
-        <div class="kpi-box">
+        <div class="kpi-box kpi-negative">
             <div class="kpi-title">Distribusi</div>
-            <div class="kpi-value">{(latest_all["Bandar"] == "DISTRIBUSI").sum()}</div>
+            <div class="kpi-value">{total_distribusi}</div>
         </div>
         """, unsafe_allow_html=True)
 
     st.markdown("</div>", unsafe_allow_html=True)
+
 
     # ===============================
     # HEATMAP REKOMENDASI
@@ -971,47 +817,43 @@ if menu == "🏠 Dashboard":
     col1, col2, col3 = st.columns(3)
 
     with col1:
-        st.markdown("### 🟢 STRONG BUY")
-        for s, sc, ml in cards["STRONG BUY"][:8]:
+        st.markdown("#### 🟢 STRONG BUY")
+        for s, sc in cards["STRONG BUY"][:8]:
             st.markdown(
                 f"""
                 <div class="card card-strong">
                     {s}<br>
-                    <span>AI: {sc} | ML: {round(ml,2) if ml else 'NA'}</span>
+                    <span>Score: {sc}</span>
                 </div>
                 """,
                 unsafe_allow_html=True
             )
 
     with col2:
-        st.markdown("### 🟩 BUY / WATCH")
-        for s, sc, ml in cards["BUY / WATCH"][:8]:
+        st.markdown("#### 🟩 BUY / WATCH")
+        for s, sc in cards["BUY / WATCH"][:8]:
             st.markdown(
                 f"""
                 <div class="card card-mid">
                     {s}<br>
-                    <span>AI: {sc} | ML: {round(ml,2) if ml else 'NA'}</span>
+                    <span>Score: {sc}</span>
                 </div>
                 """,
                 unsafe_allow_html=True
             )
 
     with col3:
-        st.markdown("### ⚪ WAIT")
-        for s, sc, ml in cards["WAIT"][:8]:
+        st.markdown("#### ⚪ WAIT")
+        for s, sc in cards["WAIT"][:8]:
             st.markdown(
                 f"""
                 <div class="card card-low">
                     {s}<br>
-                    <span>AI: {sc} | ML: {round(ml,2) if ml else 'NA'}</span>
+                    <span>Score: {sc}</span>
                 </div>
                 """,
                 unsafe_allow_html=True
             )
-
-
-
-
 
     st.markdown("</div>", unsafe_allow_html=True)
 
@@ -1336,36 +1178,26 @@ def auto_alert_scheduler(df):
     # =====================
     # SIGNAL BOX
     # =====================
-    ml_conf = latest.get("ml_confidence_label_daily", None)
-    decision = final_decision_engine(ai, ml_conf)
-
-    if decision == "STRONG BUY":
+    if ai >= 75 and latest["Bandar"] == "AKUMULASI":
         st.markdown(
             f"<div class='card card-strong'>"
             f"🟢 STRONG BUY<br>"
-            f"AI: {ai} | ML: {round(ml_conf,2) if ml_conf else 'NA'}<br>"
             f"Entry: {latest['Close']:.0f}<br>"
             f"Target: {(latest['Close']*1.07):.0f}<br>"
             f"Stoploss: {(latest['Close']*0.95):.0f}"
             f"</div>",
             unsafe_allow_html=True
         )
-
-    elif decision in ["BUY / WATCH", "WATCH"]:
+    elif ai >= 60:
         st.markdown(
-            f"<div class='card card-mid'>"
-            f"🟩 BUY / WATCH<br>"
-            f"AI: {ai} | ML: {round(ml_conf,2) if ml_conf else 'NA'}"
-            f"</div>",
+            f"<div class='card card-mid'>🟩 BUY / WATCH</div>",
             unsafe_allow_html=True
         )
-
     else:
         st.markdown(
             f"<div class='card card-low'>⚪ WAIT</div>",
             unsafe_allow_html=True
         )
-
 
     # =====================
     # CANDLESTICK CHART

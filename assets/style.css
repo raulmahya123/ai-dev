@@ -1,0 +1,387 @@
+/* =========================
+   SIDEBAR
+========================= */
+section[data-testid="stSidebar"] {
+    background: linear-gradient(180deg, #0b3d2e, #1b5e20);
+}
+
+section[data-testid="stSidebar"] * {
+    color: #ffffff !important;
+}
+
+section[data-testid="stSidebar"] hr {
+    border-color: rgba(255,255,255,0.25);
+}
+
+section[data-testid="stSidebar"] .stAlert {
+    background: rgba(255,255,255,0.12);
+    border: 1px solid rgba(255,255,255,0.25);
+}
+
+section[data-testid="stSidebar"] div[role="radiogroup"] > label:hover {
+    background: rgba(255,255,255,0.12);
+    border-radius: 8px;
+    padding-left: 6px;
+}
+
+/* =========================
+   DASHBOARD
+========================= */
+.section-box {
+    background: #ffffff;
+    padding: 22px;
+    border-radius: 14px;
+    border: 1px solid #e5e7eb;
+    box-shadow: 0 6px 18px rgba(0,0,0,0.04);
+    margin-bottom: 26px;
+}
+
+.kpi-box {
+    background: #ffffff;
+    padding: 18px;
+    border-radius: 12px;
+    border: 1px solid #e5e7eb;
+    box-shadow: 0 4px 12px rgba(0,0,0,0.04);
+}
+
+.kpi-title {
+    font-size: 14px;
+    color: #6b7280;
+    margin-bottom: 6px;
+}
+
+.kpi-value {
+    font-size: 32px;
+    font-weight: 700;
+    color: #111827;
+}
+
+/* INFO BAR */
+.info-bar {
+    background: #eef6ff;
+    padding: 12px 16px;
+    border-radius: 10px;
+    font-weight: 500;
+    color: #1d4ed8;
+    margin-bottom: 18px;
+}
+
+/* =========================
+   HEATMAP CARD
+========================= */
+.card {
+    padding: 14px 16px;
+    margin-bottom: 10px;
+    border-radius: 10px;
+    font-weight: 600;
+    font-size: 14px;
+    transition: all 0.25s ease;
+}
+
+.card-strong {
+    color: #0f5132;
+    background: rgba(25, 135, 84, 0.22);
+    border: 1px solid rgba(25, 135, 84, 0.45);
+}
+
+.card-mid {
+    color: #146c43;
+    background: rgba(25, 135, 84, 0.14);
+    border: 1px solid rgba(25, 135, 84, 0.28);
+}
+
+.card-low {
+    color: #495057;
+    background: rgba(108, 117, 125, 0.15);
+    border: 1px solid rgba(108, 117, 125, 0.35);
+}
+
+.enterprise-title {
+    font-size: 28px;
+    font-weight: 700;
+    color: #000000;
+    margin-bottom: 2px;
+}
+
+.enterprise-subtitle {
+    font-size: 14px;
+    font-weight: 400;
+    color: #000000;
+    letter-spacing: 0.5px;
+    margin-bottom: 12px;
+}
+
+/* =========================
+   CUSTOM SIDEBAR RADIO MENU
+========================= */
+
+/* Hilangkan judul radio */
+section[data-testid="stSidebar"] label[data-testid="stWidgetLabel"] {
+    display: none;
+}
+
+/* Container radio */
+section[data-testid="stSidebar"] div[role="radiogroup"] {
+    gap: 6px;
+}
+
+/* Item radio (menu) */
+section[data-testid="stSidebar"] div[role="radiogroup"] > label {
+    padding: 10px 14px;
+    border-radius: 10px;
+    cursor: pointer;
+    transition: all 0.25s ease;
+    font-weight: 400;
+}
+
+/* Hover */
+section[data-testid="stSidebar"] div[role="radiogroup"] > label:hover {
+    background: rgba(255,255,255,0.12);
+}
+
+/* Active menu */
+section[data-testid="stSidebar"] div[role="radiogroup"] > label:has(input:checked) {
+    background: rgba(255,255,255,0.20);
+    font-weight: 600;
+}
+
+
+/* =========================================================
+   SIDEBAR BASE
+========================================================= */
+section[data-testid="stSidebar"] {
+    background: linear-gradient(180deg, #0b3d2e, #1b5e20);
+}
+
+section[data-testid="stSidebar"] * {
+    color: #ffffff !important;
+}
+
+/* =========================================================
+   SIDEBAR BRAND HEADER (LOGO + TEXT)
+========================================================= */
+.sidebar-brand {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: 10px 12px 8px 12px;
+}
+
+.sidebar-brand-text {
+    display: flex;
+    flex-direction: column;
+    line-height: 1.1;
+}
+
+.sidebar-brand-title {
+    font-size: 14px;
+    font-weight: 600;
+}
+
+.sidebar-brand-subtitle {
+    font-size: 11px;
+    opacity: 0.75;
+}
+
+.sidebar-divider {
+    height: 1px;
+    background: rgba(255,255,255,0.15);
+    margin: 8px 0 12px 0;
+}
+
+/* =========================================================
+   SIDEBAR HEADINGS
+========================================================= */
+section[data-testid="stSidebar"] h3 {
+    font-size: 15px;
+    font-weight: 600;
+    margin-bottom: 6px;
+}
+
+section[data-testid="stSidebar"] strong {
+    font-size: 13px;
+    opacity: 0.85;
+}
+
+/* =========================================================
+   SIDEBAR RADIO MENU (CUSTOM STYLED)
+========================================================= */
+
+/* Hilangkan label radio default */
+section[data-testid="stSidebar"] label[data-testid="stWidgetLabel"] {
+    display: none;
+}
+
+/* Radio group */
+section[data-testid="stSidebar"] div[role="radiogroup"] {
+    gap: 6px;
+}
+
+/* Radio item */
+section[data-testid="stSidebar"] div[role="radiogroup"] > label {
+    position: relative;
+    padding: 10px 14px;
+    border-radius: 10px;
+    cursor: pointer;
+    transition: all 0.25s ease;
+    font-weight: 400;
+}
+
+/* Hover */
+section[data-testid="stSidebar"] div[role="radiogroup"] > label:hover {
+    background: rgba(255,255,255,0.12);
+}
+
+/* Active */
+section[data-testid="stSidebar"] div[role="radiogroup"] > label:has(input:checked) {
+    background: rgba(255,255,255,0.22);
+    font-weight: 600;
+}
+
+/* Active indicator bar */
+section[data-testid="stSidebar"] div[role="radiogroup"] > label:has(input:checked)::before {
+    content: "";
+    position: absolute;
+    left: 0;
+    top: 20%;
+    width: 4px;
+    height: 60%;
+    background: #a7f3d0;
+    border-radius: 4px;
+}
+
+/* =========================================================
+   SIDEBAR DIVIDER
+========================================================= */
+section[data-testid="stSidebar"] hr {
+    border: 0;
+    border-top: 1px solid rgba(255,255,255,0.15);
+    margin: 12px 0;
+}
+
+/* =========================================================
+   REMOVE DEFAULT SIDEBAR PADDING (CRITICAL)
+========================================================= */
+section[data-testid="stSidebar"] > div {
+    padding-top: 0 !important;
+}
+
+/* =========================================================
+   SIDEBAR LOGO (CENTER & CLEAN)
+========================================================= */
+.sidebar-logo-wrapper {
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    padding: 16px 0 14px 0;
+}
+
+.sidebar-logo-divider {
+    height: 1px;
+    background: rgba(255,255,255,0.15);
+    margin: 0 0 12px 0;
+}
+
+
+/* =========================
+   DASHBOARD SECTION HEADER
+========================= */
+.section-header {
+    margin-bottom: 18px;
+}
+
+.section-title {
+    font-size: 20px;
+    font-weight: 700;
+    color: #111827;
+    margin-bottom: 4px;
+}
+
+.section-subtitle {
+    font-size: 13px;
+    color: #6b7280;
+}
+
+/* =========================
+   KPI VARIANTS
+========================= */
+.kpi-neutral {
+    border-left: 4px solid #3b82f6;
+}
+
+.kpi-positive {
+    border-left: 4px solid #22c55e;
+}
+
+.kpi-negative {
+    border-left: 4px solid #ef4444;
+}
+
+.kpi-box {
+    transition: all 0.25s ease;
+}
+
+.kpi-box:hover {
+    transform: translateY(-3px);
+    box-shadow: 0 10px 24px rgba(0,0,0,0.08);
+}
+
+
+/* =========================================================
+   APP HEADER (MAIN CONTENT)
+========================================================= */
+.app-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 18px;
+}
+
+.app-header-left {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+}
+
+/* Badge kecil di atas judul */
+.app-badge {
+    display: inline-block;
+    font-size: 11px;
+    font-weight: 600;
+    letter-spacing: 0.5px;
+    color: #a7f3d0;
+    background: rgba(34, 197, 94, 0.15);
+    padding: 4px 10px;
+    border-radius: 999px;
+    width: fit-content;
+}
+
+/* Judul utama */
+.app-title {
+    font-size: 30px;
+    font-weight: 800;
+    color: #ffffff;
+    line-height: 1.2;
+}
+
+/* Subtitle */
+.app-subtitle {
+    font-size: 13px;
+    color: #9ca3af;
+    letter-spacing: 0.4px;
+}
+
+/* Divider halus */
+.app-divider {
+    border: none;
+    height: 1px;
+    background: linear-gradient(
+        to right,
+        rgba(255,255,255,0.25),
+        rgba(255,255,255,0.05)
+    );
+    margin: 18px 0 26px 0;
+}
+
+
+
