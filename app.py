@@ -204,6 +204,10 @@ st.markdown("""
 DATA_PATH = "processed/daily_clean.parquet"
 HISTORY_PATH = "processed/recommendation_history.parquet"
 
+ML_DAILY_PATH = "processed/ml_confidence_label_daily.parquet"
+ML_WEEKLY_PATH = "processed/ml_confidence_label_weekly.parquet"
+ML_MONTHLY_PATH = "processed/ml_confidence_label_monthly.parquet"
+
 # ============================================================
 # DATA LOADER
 # ============================================================
@@ -223,6 +227,41 @@ def load_data():
     return pd.read_parquet(DATA_PATH)
 
 df = load_data()
+
+# ============================================================
+# LOAD ML CONFIDENCE (SAFE MERGE)
+# ============================================================
+
+def merge_ml_confidence(df, path, col_name):
+    if os.path.exists(path):
+        ml_df = pd.read_parquet(path)
+        df = df.merge(
+            ml_df,
+            on=["Symbol", "Tanggal Perdagangan Terakhir"],
+            how="left"
+        )
+    else:
+        df[col_name] = np.nan
+    return df
+
+df = merge_ml_confidence(
+    df,
+    ML_DAILY_PATH,
+    "ml_confidence_label_daily"
+)
+
+df = merge_ml_confidence(
+    df,
+    ML_WEEKLY_PATH,
+    "ml_confidence_label_weekly"
+)
+
+df = merge_ml_confidence(
+    df,
+    ML_MONTHLY_PATH,
+    "ml_confidence_label_monthly"
+)
+
 
 # ============================================================
 # TIME & MARKET SESSION ENGINE
@@ -331,6 +370,21 @@ def compute_ai_score(df_s):
 
     return min(max(score, 0), 100)
 
+
+# ============================================================
+# ML DECISION ENGINE
+# ============================================================
+def ml_decision(conf, high=0.70, mid=0.55):
+    if pd.isna(conf):
+        return "NO_ML"
+    elif conf >= high:
+        return "BUY_ML"
+    elif conf >= mid:
+        return "WATCH_ML"
+    else:
+        return "WAIT_ML"
+
+
 # ============================================================
 # STRATEGY BASE ENGINE
 # ============================================================
@@ -433,6 +487,8 @@ def strategy_daily(df):
         # ENTRY FILTER
         # =========================
         if final_score >= 60 and latest["Bandar"] != "DISTRIBUSI":
+            ml_conf = latest.get("ml_confidence_label_daily", np.nan)
+
             rows.append({
                 "Mode": "HARIAN",
                 "Saham": symbol,
@@ -443,8 +499,11 @@ def strategy_daily(df):
                 "Daily Score": daily_score,
                 "Final Score": final_score,
                 "Bandar": latest["Bandar"],
+                "ML Confidence": round(ml_conf, 3) if not pd.isna(ml_conf) else None,
+                "ML Signal": ml_decision(ml_conf),
                 "Status": "BUY" if final_score >= 75 else "WATCH"
             })
+
 
     return (
         pd.DataFrame(rows)
@@ -471,7 +530,10 @@ def strategy_weekly(df):
         score = compute_ai_score(d)
         latest = d.iloc[-1]
 
-        if score >= 60:
+        ml_conf = latest.get("ml_confidence_label_weekly", np.nan)
+        ml_signal = ml_decision(ml_conf)
+
+        if score >= 60 and ml_signal != "WAIT_ML":
             rows.append({
                 "Mode": "MINGGUAN",
                 "Saham": symbol,
@@ -480,8 +542,11 @@ def strategy_weekly(df):
                 "Resistance": round(latest["Resistance"], 0),
                 "AI Score": score,
                 "Bandar": latest["Bandar"],
+                "ML Confidence": round(ml_conf, 3) if not pd.isna(ml_conf) else None,
+                "ML Signal": ml_signal,
                 "Status": "BUY" if score >= 75 else "WATCH"
             })
+
 
     return (
         pd.DataFrame(rows)
@@ -542,10 +607,14 @@ def strategy_monthly(df):
 
         final_score = int(0.65 * ai_score + 0.35 * monthly_score)
 
+
+        ml_conf = latest.get("ml_confidence_label_monthly", np.nan)
+        ml_signal = ml_decision(ml_conf, high=0.65, mid=0.50)
+
         # =========================
         # ENTRY FILTER
         # =========================
-        if final_score >= 60 and bandar_ok:
+        if final_score >= 60 and bandar_ok and ml_signal != "WAIT_ML":
             rows.append({
                 "Mode": "BULANAN",
                 "Saham": symbol,
@@ -556,8 +625,11 @@ def strategy_monthly(df):
                 "Monthly Score": monthly_score,
                 "Final Score": final_score,
                 "Bandar": latest["Bandar"],
+                "ML Confidence": round(ml_conf, 3) if not pd.isna(ml_conf) else None,
+                "ML Signal": ml_signal,
                 "Status": "BUY" if final_score >= 75 else "WATCH"
             })
+
 
     return (
         pd.DataFrame(rows)
@@ -879,6 +951,11 @@ elif menu == "📅 Rekomendasi Harian":
     """)
 
     daily_df = strategy_daily(df)
+
+    daily_df = daily_df[
+        (daily_df["ML Signal"] != "WAIT_ML")
+    ]
+
 
     # =========================
     # EMPTY STATE (WAJIB)
