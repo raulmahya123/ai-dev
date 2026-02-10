@@ -582,37 +582,30 @@ if menu == "🏠 Dashboard":
 
     st.markdown("</div>", unsafe_allow_html=True)
 
-
 elif menu == "📅 Rekomendasi Harian":
     st.subheader("📅 Rekomendasi Harian")
     df_daily = cached_daily()
     st.dataframe(df_daily.head(selected_limit), use_container_width=True)
-
 
 elif menu == "📊 Swing Mingguan":
     st.subheader("📊 Swing Mingguan")
     df_weekly = cached_weekly()
     st.dataframe(df_weekly.head(selected_limit), use_container_width=True)
 
-
-
 elif menu == "🗓️ Rekomendasi Bulanan":
     st.subheader("🗓️ Rekomendasi Bulanan")
     df_monthly = cached_monthly()
     st.dataframe(df_monthly.head(selected_limit), use_container_width=True)
-
 
 elif menu == "⭐ Watchlist":
     st.subheader("⭐ Watchlist Akumulasi")
     wl = cached_watchlist()
     st.dataframe(wl.head(selected_limit), use_container_width=True)
 
-
 elif menu == "📊 Heatmap Matrix":
     st.subheader("📊 Heatmap Matrix")
     matrix = cached_heatmap_matrix()
     st.dataframe(matrix, use_container_width=True)
-
 
 elif menu == "🤖 Ranking Harian":
     st.subheader("🤖 Ranking Harian")
