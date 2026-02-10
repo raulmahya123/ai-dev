@@ -23,87 +23,101 @@ FEATURES = [
     "BANDAR_ENC"
 ]
 
-# GANTI SESUAI RUN:
-# label_daily | label_weekly | label_monthly
-TARGET = "label_monthly"
-
-OUTPUT_PATH = f"processed/ml_confidence_{TARGET}.parquet"
+# TRAIN SEMUA TIMEFRAME
+TARGETS = [
+    "label_daily",
+    "label_weekly",
+    "label_monthly"
+]
 
 # =========================
 # LOAD DATA
 # =========================
 df = pd.read_parquet(DATA_PATH)
 
-X = df[FEATURES]
-y = df[TARGET]
-
-print("Jumlah data:", len(df))
-print("\nTarget distribution:")
-print(y.value_counts(normalize=True))
+print("Total data:", len(df))
+print("Kolom tersedia:", df.columns.tolist())
 
 # =========================
-# TRAIN / TEST SPLIT
+# LOOP TRAINING
 # =========================
-X_train, X_test, y_train, y_test = train_test_split(
-    X,
-    y,
-    test_size=0.2,
-    random_state=42,
-    stratify=y
-)
+for TARGET in TARGETS:
 
-# =========================
-# PIPELINE (IMPUTE + SCALE + MODEL)
-# =========================
-pipeline = Pipeline([
-    ("imputer", SimpleImputer(strategy="median")),
-    ("scaler", StandardScaler()),
-    ("model", LogisticRegression(
-        max_iter=1000,
-        class_weight="balanced",
-        n_jobs=-1
-    ))
-])
+    print("\n===================================")
+    print(f"TRAINING ML → {TARGET.upper()}")
+    print("===================================")
 
-# =========================
-# TRAIN
-# =========================
-pipeline.fit(X_train, y_train)
+    X = df[FEATURES]
+    y = df[TARGET]
 
-# =========================
-# EVALUATION
-# =========================
-proba_test = pipeline.predict_proba(X_test)[:, 1]
-auc = roc_auc_score(y_test, proba_test)
+    print("\nTarget distribution:")
+    print(y.value_counts(normalize=True))
 
-print(f"\nAUC Score ({TARGET}): {auc:.4f}")
+    # =========================
+    # TRAIN / TEST SPLIT
+    # =========================
+    X_train, X_test, y_train, y_test = train_test_split(
+        X,
+        y,
+        test_size=0.2,
+        random_state=42,
+        stratify=y
+    )
 
-# =========================
-# FEATURE IMPORTANCE
-# =========================
-coef = pipeline.named_steps["model"].coef_[0]
+    # =========================
+    # PIPELINE
+    # =========================
+    pipeline = Pipeline([
+        ("imputer", SimpleImputer(strategy="median")),
+        ("scaler", StandardScaler()),
+        ("model", LogisticRegression(
+            max_iter=1000,
+            class_weight="balanced"
+        ))
+    ])
 
-importance = (
-    pd.Series(coef, index=FEATURES)
-    .sort_values(ascending=False)
-)
+    # =========================
+    # TRAIN
+    # =========================
+    pipeline.fit(X_train, y_train)
 
-print("\nFeature importance:")
-print(importance)
+    # =========================
+    # EVALUATION
+    # =========================
+    proba_test = pipeline.predict_proba(X_test)[:, 1]
+    auc = roc_auc_score(y_test, proba_test)
 
-# =========================
-# SAVE CONFIDENCE (FULL DATA)
-# =========================
-df[f"ml_confidence_{TARGET}"] = pipeline.predict_proba(X)[:, 1]
+    print(f"AUC Score ({TARGET}): {auc:.4f}")
 
-df_out = df[[
-    "Symbol",
-    "Tanggal Perdagangan Terakhir",
-    f"ml_confidence_{TARGET}"
-]]
+    # =========================
+    # FEATURE IMPORTANCE
+    # =========================
+    coef = pipeline.named_steps["model"].coef_[0]
+    importance = (
+        pd.Series(coef, index=FEATURES)
+        .sort_values(ascending=False)
+    )
 
-df_out.to_parquet(OUTPUT_PATH, index=False)
+    print("\nFeature importance:")
+    print(importance)
 
-print(f"\nML confidence saved → {OUTPUT_PATH}")
-print("\nSample:")
-print(df_out.head())
+    # =========================
+    # SAVE CONFIDENCE
+    # =========================
+    conf_col = f"ml_confidence_{TARGET}"
+    df[conf_col] = pipeline.predict_proba(X)[:, 1]
+
+    df_out = df[[
+        "Symbol",
+        "Tanggal Perdagangan Terakhir",
+        conf_col
+    ]]
+
+    output_path = f"processed/ml_confidence_{TARGET}.parquet"
+    df_out.to_parquet(output_path, index=False)
+
+    print(f"\nML confidence saved → {output_path}")
+    print("Sample:")
+    print(df_out.head())
+
+print("\n✅ SEMUA MODEL SELESAI")
