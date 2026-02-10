@@ -659,7 +659,7 @@ st.sidebar.markdown(
 
 st.sidebar.image(
     "assets/logo.png",
-    width=110
+    width=290
 )
 
 st.sidebar.markdown(
