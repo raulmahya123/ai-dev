@@ -733,6 +733,45 @@ Gunakan sebagai **alat bantu analisis**
 """)
 
 
+def heatmap_cards(df):
+    """
+    Card heatmap:
+    STRONG BUY | BUY / WATCH | WAIT
+    Output tuple: (symbol, ai_score, ml_confidence)
+    """
+    cards = {
+        "STRONG BUY": [],
+        "BUY / WATCH": [],
+        "WAIT": []
+    }
+
+    for symbol in df["Symbol"].unique():
+        d = df[df["Symbol"] == symbol].tail(120)
+        if d.empty:
+            continue
+
+        ai_score = compute_ai_score(d)
+        latest = d.iloc[-1]
+
+        # Ambil ML confidence (prioritas Daily → Weekly → Monthly)
+        ml_conf = (
+            latest.get("ml_confidence_label_daily")
+            if not pd.isna(latest.get("ml_confidence_label_daily"))
+            else latest.get("ml_confidence_label_weekly")
+            if not pd.isna(latest.get("ml_confidence_label_weekly"))
+            else latest.get("ml_confidence_label_monthly")
+        )
+
+        if latest["Bandar"] == "AKUMULASI" and ai_score >= 75:
+            cards["STRONG BUY"].append((symbol, ai_score, ml_conf))
+        elif latest["Bandar"] == "AKUMULASI" and ai_score >= 60:
+            cards["BUY / WATCH"].append((symbol, ai_score, ml_conf))
+        else:
+            cards["WAIT"].append((symbol, ai_score, ml_conf))
+
+    return cards
+
+
 # ============================================================
 # DASHBOARD UI
 # ============================================================
@@ -745,9 +784,7 @@ if menu == "🏠 Dashboard":
     st.markdown("""
     <div class="section-box">
         <div class="section-header">
-            <div class="section-title">
-                📊 Market Overview
-            </div>
+            <div class="section-title">📊 Market Overview</div>
             <div class="section-subtitle">
                 Ringkasan kondisi pasar & aktivitas bandar hari ini
             </div>
@@ -755,7 +792,7 @@ if menu == "🏠 Dashboard":
     """, unsafe_allow_html=True)
 
     # ===============================
-    # MARKET STATUS BAR
+    # MARKET STATUS
     # ===============================
     st.markdown(
         f"""
@@ -767,7 +804,7 @@ if menu == "🏠 Dashboard":
     )
 
     # ===============================
-    # KPI DATA
+    # KPI
     # ===============================
     latest_all = df.groupby("Symbol").tail(1)
 
@@ -779,7 +816,7 @@ if menu == "🏠 Dashboard":
 
     with c1:
         st.markdown(f"""
-        <div class="kpi-box kpi-neutral">
+        <div class="kpi-box">
             <div class="kpi-title">Total Saham</div>
             <div class="kpi-value">{total_saham}</div>
         </div>
@@ -787,7 +824,7 @@ if menu == "🏠 Dashboard":
 
     with c2:
         st.markdown(f"""
-        <div class="kpi-box kpi-positive">
+        <div class="kpi-box">
             <div class="kpi-title">Akumulasi</div>
             <div class="kpi-value">{total_akumulasi}</div>
         </div>
@@ -795,14 +832,13 @@ if menu == "🏠 Dashboard":
 
     with c3:
         st.markdown(f"""
-        <div class="kpi-box kpi-negative">
+        <div class="kpi-box">
             <div class="kpi-title">Distribusi</div>
             <div class="kpi-value">{total_distribusi}</div>
         </div>
         """, unsafe_allow_html=True)
 
     st.markdown("</div>", unsafe_allow_html=True)
-
 
     # ===============================
     # HEATMAP REKOMENDASI
@@ -816,46 +852,53 @@ if menu == "🏠 Dashboard":
 
     col1, col2, col3 = st.columns(3)
 
+    def ml_text(val):
+        return f"{val:.2f}" if isinstance(val, (int, float)) else "NA"
+
+    # -------- STRONG BUY --------
     with col1:
-        st.markdown("#### 🟢 STRONG BUY")
-        for s, sc in cards["STRONG BUY"][:8]:
+        st.markdown("### 🟢 STRONG BUY")
+        for s, sc, ml in cards["STRONG BUY"][:8]:
             st.markdown(
                 f"""
                 <div class="card card-strong">
-                    {s}<br>
-                    <span>Score: {sc}</span>
+                    <b>{s}</b><br>
+                    <span>AI: {sc} | ML: {ml_text(ml)}</span>
                 </div>
                 """,
                 unsafe_allow_html=True
             )
 
+    # -------- BUY / WATCH --------
     with col2:
-        st.markdown("#### 🟩 BUY / WATCH")
-        for s, sc in cards["BUY / WATCH"][:8]:
+        st.markdown("### 🟩 BUY / WATCH")
+        for s, sc, ml in cards["BUY / WATCH"][:8]:
             st.markdown(
                 f"""
                 <div class="card card-mid">
-                    {s}<br>
-                    <span>Score: {sc}</span>
+                    <b>{s}</b><br>
+                    <span>AI: {sc} | ML: {ml_text(ml)}</span>
                 </div>
                 """,
                 unsafe_allow_html=True
             )
 
+    # -------- WAIT --------
     with col3:
-        st.markdown("#### ⚪ WAIT")
-        for s, sc in cards["WAIT"][:8]:
+        st.markdown("### ⚪ WAIT")
+        for s, sc, ml in cards["WAIT"][:8]:
             st.markdown(
                 f"""
                 <div class="card card-low">
-                    {s}<br>
-                    <span>Score: {sc}</span>
+                    <b>{s}</b><br>
+                    <span>AI: {sc} | ML: {ml_text(ml)}</span>
                 </div>
                 """,
                 unsafe_allow_html=True
             )
 
     st.markdown("</div>", unsafe_allow_html=True)
+
 
 # ============================================================
 # REKOMENDASI HARIAN
