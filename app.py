@@ -91,6 +91,9 @@ def load_data():
 
 df = load_data()
 
+LATEST_SYMBOLS = df.groupby("Symbol").tail(1)["Symbol"].unique()
+
+
 # ============================================================
 # LOAD ML CONFIDENCE (SAFE MERGE)
 # ============================================================
@@ -124,6 +127,18 @@ df = merge_ml_confidence(
     ML_MONTHLY_PATH,
     "ml_confidence_label_monthly"
 )
+
+# ============================================================
+# SAFETY: PASTIKAN SEMUA KOLOM ML ADA
+# ============================================================
+
+for col in [
+    "ml_confidence_label_daily",
+    "ml_confidence_label_weekly",
+    "ml_confidence_label_monthly"
+]:
+    if col not in df.columns:
+        df[col] = np.nan
 
 
 # ============================================================
@@ -235,6 +250,37 @@ def compute_ai_score(df_s):
 
 
 # ============================================================
+# AI SCORE PRECOMPUTE MAP (PERFORMANCE FIX)
+# ============================================================
+
+@st.cache_data(show_spinner=False)
+def build_ai_score_map(df):
+    score_map = {}
+    for symbol, g in df.groupby("Symbol"):
+        d = g.sort_values("Tanggal Perdagangan Terakhir").tail(200)
+        if not d.empty:
+            score_map[symbol] = compute_ai_score(d)
+        else:
+            score_map[symbol] = 0
+    return score_map
+
+AI_SCORE_MAP = build_ai_score_map(df)
+
+
+# ============================================================
+# AI SCORE CACHE ENGINE (PERFORMANCE BOOST)
+# ============================================================
+
+# @st.cache_data(show_spinner=False)
+# def cached_ai_score(symbol):
+#     d = df[df["Symbol"] == symbol].tail(200)
+#     if d.empty:
+#         return 0
+#     return compute_ai_score(d)
+
+
+
+# ============================================================
 # ML DECISION ENGINE
 # ============================================================
 def ml_decision(conf, high=0.70, mid=0.55):
@@ -259,13 +305,13 @@ def generate_strategy(
 ):
     rows = []
 
-    for symbol in df["Symbol"].unique():
+    for symbol in LATEST_SYMBOLS:
         d = df[df["Symbol"] == symbol].tail(window)
 
         if len(d) < window * 0.7:
             continue
 
-        score = compute_ai_score(d)
+        score = AI_SCORE_MAP.get(symbol, 0)
         latest = d.iloc[-1]
 
         if score >= 60:
@@ -303,7 +349,7 @@ def strategy_daily(df):
     """
     rows = []
 
-    for symbol in df["Symbol"].unique():
+    for symbol in LATEST_SYMBOLS:
         d_all = df[df["Symbol"] == symbol].sort_values("Tanggal Perdagangan Terakhir")
 
         # Adaptive window (daily)
@@ -342,7 +388,7 @@ def strategy_daily(df):
         # =========================
         # AI SCORE (MASTER FILTER)
         # =========================
-        ai_score = compute_ai_score(d)
+        ai_score = AI_SCORE_MAP.get(symbol, 0)
 
         final_score = int(0.6 * ai_score + 0.4 * daily_score)
 
@@ -382,7 +428,7 @@ def strategy_weekly(df):
     """
     rows = []
 
-    for symbol in df["Symbol"].unique():
+    for symbol in LATEST_SYMBOLS:
         d_all = df[df["Symbol"] == symbol]
         window = min(120, len(d_all))  # adaptif
         d = d_all.tail(window)
@@ -390,7 +436,7 @@ def strategy_weekly(df):
         if len(d) < 50:
             continue
 
-        score = compute_ai_score(d)
+        score = AI_SCORE_MAP.get(symbol, 0)
         latest = d.iloc[-1]
 
         ml_conf = latest.get("ml_confidence_label_weekly", np.nan)
@@ -425,7 +471,7 @@ def strategy_monthly(df):
     """
     rows = []
 
-    for symbol in df["Symbol"].unique():
+    for symbol in LATEST_SYMBOLS:
         d_all = df[df["Symbol"] == symbol].sort_values("Tanggal Perdagangan Terakhir")
 
         # Adaptive window
@@ -466,7 +512,7 @@ def strategy_monthly(df):
         # =========================
         # AI SCORE (MASTER FILTER)
         # =========================
-        ai_score = compute_ai_score(d)
+        ai_score = AI_SCORE_MAP.get(symbol, 0)
 
         final_score = int(0.65 * ai_score + 0.35 * monthly_score)
 
@@ -513,9 +559,9 @@ def generate_watchlist(df):
     """
     rows = []
 
-    for symbol in df["Symbol"].unique():
+    for symbol in LATEST_SYMBOLS:
         d = df[df["Symbol"] == symbol].tail(120)
-        score = compute_ai_score(d)
+        score = AI_SCORE_MAP.get(symbol, 0)
         latest = d.iloc[-1]
 
         if latest["Bandar"] == "AKUMULASI" and score >= 50:
@@ -540,30 +586,30 @@ def generate_watchlist(df):
 # HEATMAP CARD ENGINE
 # ============================================================
 
-def heatmap_cards(df):
-    """
-    Card heatmap:
-    STRONG BUY | BUY / WATCH | WAIT
-    """
-    cards = {
-        "STRONG BUY": [],
-        "BUY / WATCH": [],
-        "WAIT": []
-    }
+# def heatmap_cards(df):
+#     """
+#     Card heatmap:
+#     STRONG BUY | BUY / WATCH | WAIT
+#     """
+#     cards = {
+#         "STRONG BUY": [],
+#         "BUY / WATCH": [],
+#         "WAIT": []
+#     }
 
-    for symbol in df["Symbol"].unique():
-        d = df[df["Symbol"] == symbol].tail(120)
-        score = compute_ai_score(d)
-        latest = d.iloc[-1]
+#     for symbol in LATEST_SYMBOLS:
+#         d = df[df["Symbol"] == symbol].tail(120)
+#         score = AI_SCORE_MAP.get(symbol, 0)
+#         latest = d.iloc[-1]
 
-        if latest["Bandar"] == "AKUMULASI" and score >= 75:
-            cards["STRONG BUY"].append((symbol, score))
-        elif latest["Bandar"] == "AKUMULASI" and score >= 60:
-            cards["BUY / WATCH"].append((symbol, score))
-        else:
-            cards["WAIT"].append((symbol, score))
+#         if latest["Bandar"] == "AKUMULASI" and score >= 75:
+#             cards["STRONG BUY"].append((symbol, score))
+#         elif latest["Bandar"] == "AKUMULASI" and score >= 60:
+#             cards["BUY / WATCH"].append((symbol, score))
+#         else:
+#             cards["WAIT"].append((symbol, score))
 
-    return cards
+#     return cards
 
 # ============================================================
 # HEATMAP MATRIX ENGINE (CONFIDENCE × VOLUME)
@@ -577,9 +623,9 @@ def heatmap_matrix_engine(df):
     """
     rows = []
 
-    for symbol in df["Symbol"].unique():
+    for symbol in LATEST_SYMBOLS:
         d = df[df["Symbol"] == symbol].tail(120)
-        score = compute_ai_score(d)
+        score = AI_SCORE_MAP.get(symbol, 0)
         latest = d.iloc[-1]
 
         rows.append({
@@ -622,9 +668,9 @@ def auto_ranking(df, top_n=5):
     """
     rows = []
 
-    for symbol in df["Symbol"].unique():
+    for symbol in LATEST_SYMBOLS:
         d = df[df["Symbol"] == symbol].tail(200)
-        score = compute_ai_score(d)
+        score = AI_SCORE_MAP.get(symbol, 0)
         latest = d.iloc[-1]
 
         rows.append({
@@ -745,12 +791,12 @@ def heatmap_cards(df):
         "WAIT": []
     }
 
-    for symbol in df["Symbol"].unique():
+    for symbol in LATEST_SYMBOLS:
         d = df[df["Symbol"] == symbol].tail(120)
         if d.empty:
             continue
 
-        ai_score = compute_ai_score(d)
+        ai_score = AI_SCORE_MAP.get(symbol, 0)
         latest = d.iloc[-1]
 
         # Ambil ML confidence (prioritas Daily → Weekly → Monthly)
@@ -1106,7 +1152,7 @@ def backtest_tp_sl(
     """
     results = []
 
-    for symbol in df["Symbol"].unique():
+    for symbol in LATEST_SYMBOLS:
         d = (
             df[df["Symbol"] == symbol]
             .sort_values("Tanggal Perdagangan Terakhir")
@@ -1191,9 +1237,7 @@ def auto_alert_scheduler(df):
 # ANALISA 1 SAHAM (DETAIL VIEW)
 # ============================================================
 
-    elif menu == "🔍 Analisa 1 Saham":
-
-        st.subheader("🔍 Analisa Detail Saham")
+if menu == "🔍 Analisa 1 Saham":
 
     symbol = st.selectbox(
         "Pilih Saham",
@@ -1206,95 +1250,102 @@ def auto_alert_scheduler(df):
         .tail(250)
     )
 
-    # =====================
-    # METRICS
-    # =====================
-    ai = compute_ai_score(df_s)
-    latest = df_s.iloc[-1]
-
-    c1, c2, c3, c4 = st.columns(4)
-    c1.metric("Harga", f"{latest['Close']:.0f}")
-    c2.metric("Bandar", latest["Bandar"])
-    c3.metric("AI Score", ai)
-    c4.metric("Volume", f"{latest['Volume']:,}")
-
-    # =====================
-    # SIGNAL BOX
-    # =====================
-    if ai >= 75 and latest["Bandar"] == "AKUMULASI":
-        st.markdown(
-            f"<div class='card card-strong'>"
-            f"🟢 STRONG BUY<br>"
-            f"Entry: {latest['Close']:.0f}<br>"
-            f"Target: {(latest['Close']*1.07):.0f}<br>"
-            f"Stoploss: {(latest['Close']*0.95):.0f}"
-            f"</div>",
-            unsafe_allow_html=True
-        )
-    elif ai >= 60:
-        st.markdown(
-            f"<div class='card card-mid'>🟩 BUY / WATCH</div>",
-            unsafe_allow_html=True
-        )
+    if df_s.empty:
+        st.warning("Data saham tidak tersedia.")
     else:
-        st.markdown(
-            f"<div class='card card-low'>⚪ WAIT</div>",
-            unsafe_allow_html=True
+        ai = compute_ai_score(df_s)
+        latest = df_s.iloc[-1]
+
+        # =====================
+        # METRICS
+        # =====================
+        c1, c2, c3, c4 = st.columns(4)
+        c1.metric("Harga", f"{latest['Close']:.0f}")
+        c2.metric("Bandar", latest["Bandar"])
+        c3.metric("AI Score", ai)
+        c4.metric("Volume", f"{latest['Volume']:,}")
+
+        # =====================
+        # SIGNAL BOX
+        # =====================
+        if ai >= 75 and latest["Bandar"] == "AKUMULASI":
+            st.markdown(
+                f"""
+                <div class='card card-strong'>
+                    🟢 STRONG BUY<br>
+                    Entry: {latest['Close']:.0f}<br>
+                    Target: {(latest['Close']*1.07):.0f}<br>
+                    Stoploss: {(latest['Close']*0.95):.0f}
+                </div>
+                """,
+                unsafe_allow_html=True
+            )
+        elif ai >= 60:
+            st.markdown(
+                "<div class='card card-mid'>🟩 BUY / WATCH</div>",
+                unsafe_allow_html=True
+            )
+        else:
+            st.markdown(
+                "<div class='card card-low'>⚪ WAIT</div>",
+                unsafe_allow_html=True
+            )
+
+        # =====================
+        # CANDLESTICK CHART
+        # =====================
+        st.markdown("### 📈 Grafik Candlestick")
+
+        chart_df = df_s.set_index("Tanggal Perdagangan Terakhir")
+
+        fig, _ = mpf.plot(
+            chart_df,
+            type="candle",
+            volume=True,
+            mav=(20, 50),
+            returnfig=True,
+            style="yahoo",
+            figsize=(16, 8),
+            title=symbol
         )
+        st.pyplot(fig)
 
-    # =====================
-    # CANDLESTICK CHART
-    # =====================
-    st.markdown("### 📈 Grafik Candlestick")
-
-    df_chart = df_s.set_index("Tanggal Perdagangan Terakhir")
-
-    fig, _ = mpf.plot(
-        df_chart,
-        type="candle",
-        style="yahoo",
-        volume=True,
-        mav=(20, 50),
-        returnfig=True,
-        figsize=(16, 8),
-        title=symbol
-    )
-    st.pyplot(fig)
 
 # ============================================================
-# AUTO BACKTEST & ALERT EXECUTION
+# AUTO ALERT EXECUTION (SAFE)
 # ============================================================
 
-    if menu == "🏠 Dashboard":
-        # Auto alert only from dashboard
-        auto_alert_scheduler(df)
+if menu == "🏠 Dashboard":
+    # Auto alert only from dashboard (SAFE MODE)
+    auto_alert_scheduler(df)
+
 
 # ============================================================
-# BACKTEST UI (APPENDED TO DASHBOARD)
+# BACKTEST UI (DISABLED – PERFORMANCE REASON)
 # ============================================================
 
-    if menu == "🏠 Dashboard":
+# if menu == "🏠 Dashboard":
+#     st.markdown("---")
+#     st.subheader("📈 Backtest Statistik Sistem")
+#
+#     result = backtest_tp_sl(
+#         df,
+#         tp_pct=0.07,
+#         sl_pct=0.05,
+#         holding_days=10
+#     )
+#
+#     c1, c2 = st.columns(2)
+#     c1.metric("Total Trade", result["total_trade"])
+#     c2.metric("Winrate (%)", result["winrate"])
 
-        st.markdown("---")
-        st.subheader("📈 Backtest Statistik Sistem")
-
-        result = backtest_tp_sl(
-            df,
-            tp_pct=0.07,
-            sl_pct=0.05,
-            holding_days=10
-        )
-
-        c1, c2 = st.columns(2)
-        c1.metric("Total Trade", result["total_trade"])
-        c2.metric("Winrate (%)", result["winrate"])
 
 # ============================================================
 # FOOTER
 # ============================================================
 
-    st.markdown("""
-    ---
-    © 2026 **SahamAI Enterprise**  
-    Green • Quant • IDX • AI Powered
-    """)
+st.markdown("""
+---
+© 2026 **SahamAI Enterprise**  
+Green • Quant • IDX • AI Powered
+""")
