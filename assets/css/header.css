@@ -1,0 +1,59 @@
+/* =========================================================
+   APP HEADER
+   SahamAI Enterprise
+========================================================= */
+
+/* ---------- HEADER CONTAINER ---------- */
+.app-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 18px;
+}
+
+/* ---------- LEFT HEADER STACK ---------- */
+.app-header-left {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+}
+
+/* ---------- BADGE ---------- */
+.app-badge {
+    display: inline-block;
+    width: fit-content;
+    font-size: 11px;
+    font-weight: 600;
+    letter-spacing: 0.5px;
+    color: #a7f3d0;
+    background: var(--primary-soft);
+    padding: 4px 10px;
+    border-radius: 999px;
+}
+
+/* ---------- TITLE ---------- */
+.app-title {
+    font-size: 30px;
+    font-weight: 800;
+    color: #ffffff;
+    line-height: 1.2;
+}
+
+/* ---------- SUBTITLE ---------- */
+.app-subtitle {
+    font-size: 13px;
+    color: var(--text-light);
+    letter-spacing: 0.4px;
+}
+
+/* ---------- DIVIDER ---------- */
+.app-divider {
+    border: none;
+    height: 1px;
+    background: linear-gradient(
+        to right,
+        rgba(255,255,255,0.25),
+        rgba(255,255,255,0.05)
+    );
+    margin: 18px 0 26px 0;
+}

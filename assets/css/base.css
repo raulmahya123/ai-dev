@@ -1,0 +1,25 @@
+/* =========================================================
+   BASE (SAFE VERSION - NO THEME OVERRIDE)
+   SahamAI Enterprise
+========================================================= */
+
+/* ROOT VARIABLES (boleh tetap ada untuk future use) */
+:root {
+    --primary: #22c55e;
+    --primary-soft: rgba(34, 197, 94, 0.15);
+}
+
+/* HANYA FONT - JANGAN UBAH BACKGROUND */
+html, body {
+    font-family: "Inter", "Segoe UI", system-ui, -apple-system, BlinkMacSystemFont, sans-serif;
+}
+
+/* JANGAN override h1,h2,h3 global */
+/* JANGAN override p global */
+/* JANGAN override body color */
+
+/* Utility optional */
+.hover-lift:hover {
+    transform: translateY(-3px);
+    box-shadow: 0 10px 24px rgba(0,0,0,0.08);
+}

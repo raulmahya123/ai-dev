@@ -17,12 +17,25 @@ st.set_page_config(
     initial_sidebar_state="expanded"
 )
 
-# =====================================================
-# LOAD STYLE (ASLI)
-# =====================================================
-if os.path.exists("assets/style.css"):
-    with open("assets/style.css") as f:
-        st.markdown(f"<style>{f.read()}</style>", unsafe_allow_html=True)
+def load_css():
+    css_files = [
+        "assets/css/base.css",
+        "assets/css/sidebar.css",
+        "assets/css/header.css",
+        "assets/css/dashboard.css",
+        "assets/css/heatmap.css",
+    ]
+
+    css_content = ""
+    for css_file in css_files:
+        if os.path.exists(css_file):
+            with open(css_file) as f:
+                css_content += f.read() + "\n"
+
+    st.markdown(f"<style>{css_content}</style>", unsafe_allow_html=True)
+
+load_css()
+
 
 st.markdown("""
 <div class="app-header">

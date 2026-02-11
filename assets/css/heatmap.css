@@ -1,0 +1,53 @@
+/* =========================================================
+   HEATMAP RECOMMENDATION
+   FORCE CLEAN LIGHT CARD
+========================================================= */
+
+/* =========================
+   BASE CARD
+========================= */
+
+div[data-testid="stMarkdownContainer"] .card {
+    padding: 14px 16px;
+    margin-bottom: 10px;
+    border-radius: 10px;
+    font-weight: 600;
+    font-size: 14px;
+    transition: all 0.25s ease;
+}
+
+/* Hover */
+div[data-testid="stMarkdownContainer"] .card:hover {
+    transform: translateY(-2px);
+    box-shadow: 0 8px 20px rgba(0,0,0,0.08);
+}
+
+/* =========================
+   STRONG BUY
+========================= */
+
+.card-strong {
+    color: #0f5132 !important;
+    background: rgba(25, 135, 84, 0.22) !important;
+    border: 1px solid rgba(25, 135, 84, 0.45) !important;
+}
+
+/* =========================
+   BUY / WATCH
+========================= */
+
+.card-mid {
+    color: #146c43 !important;
+    background: rgba(25, 135, 84, 0.14) !important;
+    border: 1px solid rgba(25, 135, 84, 0.28) !important;
+}
+
+/* =========================
+   WAIT
+========================= */
+
+.card-low {
+    color: #495057 !important;
+    background: rgba(108, 117, 125, 0.15) !important;
+    border: 1px solid rgba(108, 117, 125, 0.35) !important;
+}
