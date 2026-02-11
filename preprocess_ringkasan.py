@@ -3,24 +3,24 @@ import glob
 import os
 
 # =====================================================
-# 1. LOAD FILE EXCEL RINGKASAN SAHAM
+# 1. KONFIGURASI PATH
 # =====================================================
-PATH = "data/ringkasan_saham/*.xlsx"
-files = glob.glob(PATH)
+RAW_PATH = "data/ringkasan_saham/*.xlsx"
+OUT_PATH = "processed/daily_clean.parquet"
+
+files = glob.glob(RAW_PATH)
 
 print("📂 File ditemukan:")
 for f in files:
-    print(" -", f)
+    print(" -", os.path.basename(f))
 
-if len(files) == 0:
-    raise Exception("❌ Tidak ada file Excel di data/ringkasan_saham")
-
-dfs = []
+if not files:
+    raise RuntimeError("❌ Tidak ada file Excel di data/ringkasan_saham")
 
 # =====================================================
 # 2. MAP BULAN INDONESIA → INGGRIS
 # =====================================================
-bulan_map = {
+BULAN_MAP = {
     "Januari": "January",
     "Februari": "February",
     "Maret": "March",
@@ -32,38 +32,71 @@ bulan_map = {
     "September": "September",
     "Oktober": "October",
     "November": "November",
-    "Desember": "December"
+    "Desember": "December",
 }
 
 def parse_tanggal_indo(x):
     if isinstance(x, str):
-        for indo, eng in bulan_map.items():
+        for indo, eng in BULAN_MAP.items():
             x = x.replace(indo, eng)
     return pd.to_datetime(x, errors="coerce")
 
 # =====================================================
-# 3. LOAD & CLEAN SETIAP FILE
+# 3. LOAD + CLEAN SETIAP FILE
 # =====================================================
+dfs = []
+
 for file in files:
+    print(f"\n📥 Load {os.path.basename(file)}")
     df = pd.read_excel(file)
 
-    # --- Parsing tanggal Indonesia ---
-    df['Tanggal Perdagangan Terakhir'] = df[
-        'Tanggal Perdagangan Terakhir'
-    ].apply(parse_tanggal_indo)
+    # --- VALIDASI KOLOM WAJIB ---
+    required_cols = [
+        "Tanggal Perdagangan Terakhir",
+        "Nama Perusahaan",
+        "Open Price",
+        "Tertinggi",
+        "Terendah",
+        "Penutupan",
+        "Volume",
+        "Foreign Buy",
+        "Foreign Sell",
+    ]
 
-    # Drop kalau tanggal invalid
-    df = df.dropna(subset=['Tanggal Perdagangan Terakhir'])
+    missing = [c for c in required_cols if c not in df.columns]
+    if missing:
+        raise ValueError(f"❌ Kolom wajib tidak ada di {file}: {missing}")
 
-    # --- Rename kolom agar konsisten ---
-    df.rename(columns={
-        "Nama Perusahaan": "Symbol",
-        "Open Price": "Open",
-        "Tertinggi": "High",
-        "Terendah": "Low",
-        "Penutupan": "Close",
-        "Volume": "Volume"
-    }, inplace=True)
+    # --- PARSE TANGGAL ---
+    df["Tanggal"] = df["Tanggal Perdagangan Terakhir"].apply(parse_tanggal_indo)
+    df = df.dropna(subset=["Tanggal"])
+
+    # --- RENAME KOLOM ---
+    df = df.rename(
+        columns={
+            "Nama Perusahaan": "Symbol",
+            "Open Price": "Open",
+            "Tertinggi": "High",
+            "Terendah": "Low",
+            "Penutupan": "Close",
+        }
+    )
+
+    # --- CAST NUMERIC ---
+    numeric_cols = [
+        "Open",
+        "High",
+        "Low",
+        "Close",
+        "Volume",
+        "Foreign Buy",
+        "Foreign Sell",
+    ]
+    df[numeric_cols] = df[numeric_cols].apply(
+        pd.to_numeric, errors="coerce"
+    )
+
+    df = df.dropna(subset=["Close", "Low", "High"])
 
     dfs.append(df)
 
@@ -72,61 +105,64 @@ for file in files:
 # =====================================================
 data = pd.concat(dfs, ignore_index=True)
 
-data.sort_values(
-    ["Symbol", "Tanggal Perdagangan Terakhir"],
-    inplace=True
-)
+data = data.sort_values(
+    ["Symbol", "Tanggal"]
+).reset_index(drop=True)
 
 # =====================================================
 # 5. DETEKSI BANDAR (FOREIGN FLOW)
 # =====================================================
-def bandar(row):
-    if row['Foreign Buy'] > row['Foreign Sell']:
+def classify_bandar(row):
+    if row["Foreign Buy"] > row["Foreign Sell"]:
         return "AKUMULASI"
-    elif row['Foreign Sell'] > row['Foreign Buy']:
+    elif row["Foreign Sell"] > row["Foreign Buy"]:
         return "DISTRIBUSI"
     else:
         return "NETRAL"
 
-data['Bandar'] = data.apply(bandar, axis=1)
+data["Bandar"] = data.apply(classify_bandar, axis=1)
 
 # =====================================================
-# 6. SUPPORT & RESISTANCE (20 HARI)
+# 6. SUPPORT & RESISTANCE (ROLLING 20 HARI)
 # =====================================================
-data['Support'] = (
-    data.groupby("Symbol")['Low']
-    .rolling(20)
+data["Support"] = (
+    data.groupby("Symbol")["Low"]
+    .rolling(window=20, min_periods=5)
     .min()
-    .reset_index(0, drop=True)
+    .reset_index(level=0, drop=True)
 )
 
-data['Resistance'] = (
-    data.groupby("Symbol")['High']
-    .rolling(20)
+data["Resistance"] = (
+    data.groupby("Symbol")["High"]
+    .rolling(window=20, min_periods=5)
     .max()
-    .reset_index(0, drop=True)
+    .reset_index(level=0, drop=True)
 )
 
 # =====================================================
-# 7. SIGNAL BUY + TP SL (SWING)
+# 7. SIGNAL BUY + TP / SL (SWING TRADING)
 # =====================================================
-data['BUY'] = (
-    (data['Close'] <= data['Support'] * 1.02) &
-    (data['Bandar'] == "AKUMULASI")
+data["BUY"] = (
+    (data["Close"] <= data["Support"] * 1.02)
+    & (data["Bandar"] == "AKUMULASI")
 )
 
-data['TP'] = data['Close'] * 1.07   # Take Profit 7%
-data['SL'] = data['Close'] * 0.95   # Stop Loss 5%
+data["TP"] = (data["Close"] * 1.07).round(2)
+data["SL"] = (data["Close"] * 0.95).round(2)
 
 # =====================================================
-# 8. SIMPAN DATA CEPAT (PARQUET)
+# 8. SIMPAN KE PARQUET
 # =====================================================
 os.makedirs("processed", exist_ok=True)
-data.to_parquet("processed/daily_clean.parquet", index=False)
+data.to_parquet(OUT_PATH, index=False)
 
+# =====================================================
+# 9. RINGKASAN OUTPUT
+# =====================================================
 print("\n✅ PREPROCESS SELESAI")
-print("📦 File tersimpan : processed/daily_clean.parquet")
-print("📊 Total baris    :", len(data))
-print("📈 Total saham    :", data['Symbol'].nunique())
-print("🏦 Akumulasi rows :", (data['Bandar'] == 'AKUMULASI').sum())
-print("🔴 Distribusi rows:", (data['Bandar'] == 'DISTRIBUSI').sum())
+print(f"📦 File      : {OUT_PATH}")
+print(f"📊 Baris     : {len(data):,}")
+print(f"📈 Saham     : {data['Symbol'].nunique():,}")
+print(f"🏦 Akumulasi : {(data['Bandar'] == 'AKUMULASI').sum():,}")
+print(f"🔴 Distribusi: {(data['Bandar'] == 'DISTRIBUSI').sum():,}")
+print(f"🟢 BUY Signal: {data['BUY'].sum():,}")

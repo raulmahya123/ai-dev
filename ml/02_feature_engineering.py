@@ -1,25 +1,30 @@
 import pandas as pd
 import numpy as np
+import os
 
+# =====================================================
+# PATH
+# =====================================================
 DATA_PATH = "processed/daily_clean.parquet"
 OUTPUT_PATH = "ml/dataset_features.parquet"
+os.makedirs("ml", exist_ok=True)
 
-# =========================
+# =====================================================
 # LOAD DATA
-# =========================
+# =====================================================
 df = pd.read_parquet(DATA_PATH)
 
-# Pastikan urut waktu per saham
-df = df.sort_values(
-    ["Kode Saham", "Tanggal Perdagangan Terakhir"]
-).reset_index(drop=True)
+# konsistensi kolom
+df = df.rename(columns={
+    "Symbol": "Saham",
+    "Tanggal": "Tanggal"
+})
 
-# =========================
-# HELPER FUNCTIONS
-# =========================
-def compute_ema(series, span):
-    return series.ewm(span=span, adjust=False).mean()
+df = df.sort_values(["Saham", "Tanggal"]).reset_index(drop=True)
 
+# =====================================================
+# HELPER (VECTORIZED)
+# =====================================================
 def compute_rsi(series, period=14):
     delta = series.diff()
     gain = delta.clip(lower=0)
@@ -29,57 +34,71 @@ def compute_rsi(series, period=14):
     rs = avg_gain / avg_loss
     return 100 - (100 / (1 + rs))
 
-# =========================
-# FEATURE ENGINEERING
-# =========================
-features = []
+# =====================================================
+# FEATURE ENGINEERING (GROUPBY TRANSFORM)
+# =====================================================
+grp = df.groupby("Saham")
 
-for kode in df["Kode Saham"].unique():
-    d = df[df["Kode Saham"] == kode].copy()
+# === EMA ===
+df["EMA10"] = grp["Close"].transform(lambda x: x.ewm(span=10, adjust=False).mean())
+df["EMA20"] = grp["Close"].transform(lambda x: x.ewm(span=20, adjust=False).mean())
+df["EMA50"] = grp["Close"].transform(lambda x: x.ewm(span=50, adjust=False).mean())
 
-    # EMA
-    d["EMA10"] = compute_ema(d["Close"], 10)
-    d["EMA20"] = compute_ema(d["Close"], 20)
-    d["EMA50"] = compute_ema(d["Close"], 50)
+# === RSI ===
+df["RSI14"] = grp["Close"].transform(compute_rsi)
 
-    # RSI
-    d["RSI14"] = compute_rsi(d["Close"])
+# === VOLUME FEATURE ===
+df["VOL_MED20"] = grp["Volume"].transform(lambda x: x.rolling(20).median())
+df["VOL_RATIO"] = df["Volume"] / df["VOL_MED20"]
 
-    # Volume ratio
-    d["VOL_MED20"] = d["Volume"].rolling(20).median()
-    d["VOL_RATIO"] = d["Volume"] / d["VOL_MED20"]
+# === DISTANCE TO SR ===
+df["DIST_SUPPORT"] = (df["Close"] - df["Support"]) / df["Close"]
+df["DIST_RESISTANCE"] = (df["Resistance"] - df["Close"]) / df["Close"]
 
-    # Distance to support / resistance
-    d["DIST_SUPPORT"] = (d["Close"] - d["Support"]) / d["Close"]
-    d["DIST_RESISTANCE"] = (d["Resistance"] - d["Close"]) / d["Close"]
+# === BANDAR ENCODING ===
+df["BANDAR_ENC"] = df["Bandar"].map({
+    "AKUMULASI": 1,
+    "NETRAL": 0,
+    "DISTRIBUSI": -1
+})
 
-    # Encode bandar
-    d["BANDAR_ENC"] = d["Bandar"].map({
-        "AKUMULASI": 1,
-        "NETRAL": 0,
-        "DISTRIBUSI": -1
-    })
+# =====================================================
+# FINAL FEATURE SET (ML-READY)
+# =====================================================
+FEATURE_COLS = [
+    "Saham",
+    "Tanggal",
+    "Open", "High", "Low", "Close", "Volume",
+    "EMA10", "EMA20", "EMA50",
+    "RSI14",
+    "VOL_RATIO",
+    "DIST_SUPPORT", "DIST_RESISTANCE",
+    "BANDAR_ENC"
+]
 
-    features.append(d)
+df_feat = df[FEATURE_COLS].copy()
 
-# Gabung semua saham
-df_feat = pd.concat(features)
-
-# =========================
-# CLEANING
-# =========================
+# =====================================================
+# CLEANING (ANTI ML NGEGAS)
+# =====================================================
 df_feat = df_feat.replace([np.inf, -np.inf], np.nan)
+
 df_feat = df_feat.dropna(subset=[
     "EMA10", "EMA20", "EMA50",
-    "RSI14", "VOL_RATIO"
+    "RSI14", "VOL_RATIO",
+    "DIST_SUPPORT", "DIST_RESISTANCE"
 ])
 
-# =========================
+# =====================================================
 # SAVE
-# =========================
-df_feat.to_parquet(OUTPUT_PATH)
+# =====================================================
+df_feat.to_parquet(OUTPUT_PATH, index=False)
 
-print("Feature engineering selesai.")
-print("Jumlah baris akhir:", len(df_feat))
-print("Kolom feature:")
-print(df_feat.columns)
+# =====================================================
+# LOG
+# =====================================================
+print("✅ FEATURE ENGINEERING SELESAI")
+print("📦 Output :", OUTPUT_PATH)
+print("📊 Baris :", f"{len(df_feat):,}")
+print("📈 Saham :", df_feat["Saham"].nunique())
+print("🧠 Feature :", [c for c in df_feat.columns if c not in ["Saham", "Tanggal"]])

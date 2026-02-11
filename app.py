@@ -1,3 +1,8 @@
+# =====================================================
+# SAHAMAI ENTERPRISE
+# PART 1 — FOUNDATION & DATA PIPELINE
+# =====================================================
+
 import streamlit as st
 import pandas as pd
 import numpy as np
@@ -7,6 +12,9 @@ import requests
 
 from datetime import datetime, date, time
 
+# =====================================================
+# PAGE CONFIG
+# =====================================================
 st.set_page_config(
     page_title="SahamAI Enterprise | IDX Trading System",
     page_icon="📈",
@@ -14,6 +22,9 @@ st.set_page_config(
     initial_sidebar_state="expanded"
 )
 
+# =====================================================
+# LOAD STYLE
+# =====================================================
 if os.path.exists("assets/style.css"):
     with open("assets/style.css") as f:
         st.markdown(f"<style>{f.read()}</style>", unsafe_allow_html=True)
@@ -31,21 +42,33 @@ st.markdown("""
 <hr class="app-divider">
 """, unsafe_allow_html=True)
 
+# =====================================================
+# PATH CONFIG
+# =====================================================
 DATA_PATH = "processed/daily_clean.parquet"
 
 ML_DAILY_PATH   = "processed/ml_confidence_label_daily.parquet"
 ML_WEEKLY_PATH  = "processed/ml_confidence_label_weekly.parquet"
 ML_MONTHLY_PATH = "processed/ml_confidence_label_monthly.parquet"
 
+# WALK-FORWARD RESULT (LIGHTGBM)
+WF_PATH = "processed/walk_forward_result_weekly.parquet"
+
+# =====================================================
+# LOAD MAIN DATA
+# =====================================================
 @st.cache_data(show_spinner=False)
 def load_data():
     if not os.path.exists(DATA_PATH):
-        st.error("❌ Data utama tidak ditemukan")
+        st.error("❌ daily_clean.parquet tidak ditemukan")
         st.stop()
     return pd.read_parquet(DATA_PATH)
 
 df = load_data()
 
+# =====================================================
+# MERGE ML CONFIDENCE
+# =====================================================
 def merge_ml(df, path, col):
     if os.path.exists(path):
         ml = pd.read_parquet(path)
@@ -70,6 +93,9 @@ for c in [
     if c not in df.columns:
         df[c] = np.nan
 
+# =====================================================
+# SYMBOL LIST
+# =====================================================
 LATEST_SYMBOLS = (
     df.sort_values("Tanggal Perdagangan Terakhir")
       .groupby("Symbol")
@@ -77,12 +103,11 @@ LATEST_SYMBOLS = (
       .tolist()
 )
 
+# =====================================================
+# SYMBOL MAP (O(1) ACCESS)
+# =====================================================
 @st.cache_data(show_spinner=False)
 def build_symbol_map(df):
-    """
-    Akses data saham O(1)
-    Menghilangkan df[df['Symbol']==...] di loop
-    """
     return {
         symbol: g.sort_values("Tanggal Perdagangan Terakhir")
         for symbol, g in df.groupby("Symbol")
@@ -90,113 +115,201 @@ def build_symbol_map(df):
 
 SYMBOL_MAP = build_symbol_map(df)
 
-def market_open_status():
-    now = datetime.now()
-    open_t  = datetime.combine(date.today(), time(9, 0))
-    close_t = datetime.combine(date.today(), time(15, 0))
-
-    if now < open_t:
-        return "PREOPEN", open_t - now
-    elif open_t <= now <= close_t:
-        return "OPEN", None
-    else:
-        return "CLOSED", None
-
-def market_countdown_text():
-    status, delta = market_open_status()
-    if status == "PREOPEN":
-        return f"⏰ Market Open dalam {str(delta).split('.')[0]}"
-    if status == "OPEN":
-        return "🟢 Market Sedang Buka"
-    return "🔴 Market Tutup"
-
-def compute_rsi(series, period=14):
-    delta = series.diff()
-    gain  = delta.clip(lower=0)
-    loss  = -delta.clip(upper=0)
-    avg_gain = gain.rolling(period).mean()
-    avg_loss = loss.rolling(period).mean()
-    rs = avg_gain / avg_loss
-    return 100 - (100 / (1 + rs))
-
-def compute_ema(series, span):
-    return series.ewm(span=span, adjust=False).mean()
-
-def compute_volume_spike(volume, window=20):
-    med = volume.rolling(window).median()
-    return volume / med
-
-def bandar_score(status):
-    if status == "AKUMULASI":
-        return 40
-    if status == "DISTRIBUSI":
-        return -20
-    return 0
-
-def compute_ai_score(df_s):
-    if df_s is None or df_s.empty:
-        return 0
-
-    d = df_s.copy()
-
-    d["EMA20"] = compute_ema(d["Close"], 20)
-    d["EMA50"] = compute_ema(d["Close"], 50)
-    d["RSI"]   = compute_rsi(d["Close"])
-    d["VOL_SPIKE"] = compute_volume_spike(d["Volume"])
-
-    latest = d.iloc[-1]
-    score = 0
-
-    score += bandar_score(latest.get("Bandar"))
-
-    if latest["EMA20"] > latest["EMA50"]:
-        score += 25
-
-    if latest["RSI"] < 70:
-        score += 20
-    elif latest["RSI"] > 80:
-        score -= 10
-
-    if latest["VOL_SPIKE"] > 1.2:
-        score += 15
-
-    return int(min(max(score, 0), 100))
-
-
+# =====================================================
+# LOAD WALK-FORWARD META (PnL AWARE)
+# =====================================================
 @st.cache_data(show_spinner=False)
-def build_ai_score_map(symbol_map):
-    score_map = {}
-    for symbol, d_all in symbol_map.items():
-        d = d_all.tail(200)
-        score_map[symbol] = compute_ai_score(d)
-    return score_map
+def load_wf_meta():
+    default = {
+        "threshold": 0.65,
+        "precision": 0.0,
+        "winrate": 0.0,
+        "avg_pnl": 0.0,
+        "trades": 0
+    }
 
-AI_SCORE_MAP = build_ai_score_map(SYMBOL_MAP)
+    if not os.path.exists(WF_PATH):
+        return default
 
+    wf = pd.read_parquet(WF_PATH)
+    if wf.empty:
+        return default
 
-def ml_decision(conf, high=0.70, mid=0.55):
-    if pd.isna(conf):
-        return "NO_ML"
-    if conf >= high:
-        return "BUY_ML"
-    if conf >= mid:
-        return "WATCH_ML"
-    return "WAIT_ML"
+    last = wf.sort_values("test_end").iloc[-1]
 
+    return {
+        "threshold": float(last["threshold"]),
+        "precision": float(last["precision"]),
+        "winrate": float(last["winrate"]),
+        "avg_pnl": float(last["avg_pnl"]),
+        "trades": int(last["trades"])
+    }
 
+WF_META = load_wf_meta()
+# =====================================================
+# SAHAMAI ENTERPRISE
+# PART 1 — FOUNDATION & DATA PIPELINE
+# =====================================================
+
+import streamlit as st
+import pandas as pd
+import numpy as np
+import mplfinance as mpf
+import os
+import requests
+
+from datetime import datetime, date, time
+
+# =====================================================
+# PAGE CONFIG
+# =====================================================
+st.set_page_config(
+    page_title="SahamAI Enterprise | IDX Trading System",
+    page_icon="📈",
+    layout="wide",
+    initial_sidebar_state="expanded"
+)
+
+# =====================================================
+# LOAD STYLE
+# =====================================================
+if os.path.exists("assets/style.css"):
+    with open("assets/style.css") as f:
+        st.markdown(f"<style>{f.read()}</style>", unsafe_allow_html=True)
+
+st.markdown("""
+<div class="app-header">
+  <div class="app-header-left">
+    <div class="app-badge">📊 AI SYSTEM</div>
+    <div class="app-title">SahamAI Enterprise</div>
+    <div class="app-subtitle">
+      Daily • Weekly • Monthly • Heatmap • AI Score
+    </div>
+  </div>
+</div>
+<hr class="app-divider">
+""", unsafe_allow_html=True)
+
+# =====================================================
+# PATH CONFIG
+# =====================================================
+DATA_PATH = "processed/daily_clean.parquet"
+
+ML_DAILY_PATH   = "processed/ml_confidence_label_daily.parquet"
+ML_WEEKLY_PATH  = "processed/ml_confidence_label_weekly.parquet"
+ML_MONTHLY_PATH = "processed/ml_confidence_label_monthly.parquet"
+
+# WALK-FORWARD RESULT (LIGHTGBM)
+WF_PATH = "processed/walk_forward_result_weekly.parquet"
+
+# =====================================================
+# LOAD MAIN DATA
+# =====================================================
+@st.cache_data(show_spinner=False)
+def load_data():
+    if not os.path.exists(DATA_PATH):
+        st.error("❌ daily_clean.parquet tidak ditemukan")
+        st.stop()
+    return pd.read_parquet(DATA_PATH)
+
+df = load_data()
+
+# =====================================================
+# MERGE ML CONFIDENCE
+# =====================================================
+def merge_ml(df, path, col):
+    if os.path.exists(path):
+        ml = pd.read_parquet(path)
+        df = df.merge(
+            ml,
+            on=["Symbol", "Tanggal Perdagangan Terakhir"],
+            how="left"
+        )
+    else:
+        df[col] = np.nan
+    return df
+
+df = merge_ml(df, ML_DAILY_PATH,   "ml_confidence_label_daily")
+df = merge_ml(df, ML_WEEKLY_PATH,  "ml_confidence_label_weekly")
+df = merge_ml(df, ML_MONTHLY_PATH, "ml_confidence_label_monthly")
+
+for c in [
+    "ml_confidence_label_daily",
+    "ml_confidence_label_weekly",
+    "ml_confidence_label_monthly"
+]:
+    if c not in df.columns:
+        df[c] = np.nan
+
+# =====================================================
+# SYMBOL LIST
+# =====================================================
+LATEST_SYMBOLS = (
+    df.sort_values("Tanggal Perdagangan Terakhir")
+      .groupby("Symbol")
+      .tail(1)["Symbol"]
+      .tolist()
+)
+
+# =====================================================
+# SYMBOL MAP (O(1) ACCESS)
+# =====================================================
+@st.cache_data(show_spinner=False)
+def build_symbol_map(df):
+    return {
+        symbol: g.sort_values("Tanggal Perdagangan Terakhir")
+        for symbol, g in df.groupby("Symbol")
+    }
+
+SYMBOL_MAP = build_symbol_map(df)
+
+# =====================================================
+# LOAD WALK-FORWARD META (PnL AWARE)
+# =====================================================
+@st.cache_data(show_spinner=False)
+def load_wf_meta():
+    default = {
+        "threshold": 0.65,
+        "precision": 0.0,
+        "winrate": 0.0,
+        "avg_pnl": 0.0,
+        "trades": 0
+    }
+
+    if not os.path.exists(WF_PATH):
+        return default
+
+    wf = pd.read_parquet(WF_PATH)
+    if wf.empty:
+        return default
+
+    last = wf.sort_values("test_end").iloc[-1]
+
+    return {
+        "threshold": float(last["threshold"]),
+        "precision": float(last["precision"]),
+        "winrate": float(last["winrate"]),
+        "avg_pnl": float(last["avg_pnl"]),
+        "trades": int(last["trades"])
+    }
+
+WF_META = load_wf_meta()
+# =====================================================
+# PART 3 — STRATEGY ENGINE
+# =====================================================
+
+# =====================================================
+# STRATEGY DAILY — CLASSIC (ASLI)
+# =====================================================
 def strategy_daily():
     rows = []
 
     for symbol in LATEST_SYMBOLS:
         d_all = SYMBOL_MAP.get(symbol)
-        if d_all is None:
+        if d_all is None or len(d_all) < 30:
             continue
 
-        d = d_all.tail(30)
-        if len(d) < 15:
-            continue
-
-        d = d.copy()
+        d = d_all.tail(30).copy()
         d["EMA10"] = compute_ema(d["Close"], 10)
         d["EMA20"] = compute_ema(d["Close"], 20)
         d["RSI"]   = compute_rsi(d["Close"])
@@ -216,6 +329,7 @@ def strategy_daily():
 
         if final_score >= 60 and latest["Bandar"] != "DISTRIBUSI":
             ml_conf = latest.get("ml_confidence_label_daily", np.nan)
+
             rows.append({
                 "Mode": "HARIAN",
                 "Saham": symbol,
@@ -239,19 +353,18 @@ def strategy_daily():
     )
 
 
+# =====================================================
+# STRATEGY WEEKLY — CLASSIC
+# =====================================================
 def strategy_weekly():
     rows = []
 
     for symbol in LATEST_SYMBOLS:
         d_all = SYMBOL_MAP.get(symbol)
-        if d_all is None:
+        if d_all is None or len(d_all) < 120:
             continue
 
-        d = d_all.tail(120)
-        if len(d) < 50:
-            continue
-
-        latest = d.iloc[-1]
+        latest = d_all.iloc[-1]
         ai_score = AI_SCORE_MAP.get(symbol, 0)
         ml_conf = latest.get("ml_confidence_label_weekly", np.nan)
 
@@ -277,19 +390,18 @@ def strategy_weekly():
     )
 
 
+# =====================================================
+# STRATEGY MONTHLY — CLASSIC
+# =====================================================
 def strategy_monthly():
     rows = []
 
     for symbol in LATEST_SYMBOLS:
         d_all = SYMBOL_MAP.get(symbol)
-        if d_all is None:
+        if d_all is None or len(d_all) < 250:
             continue
 
-        d = d_all.tail(250)
-        if len(d) < 100:
-            continue
-
-        d = d.copy()
+        d = d_all.tail(250).copy()
         d["EMA50"]  = compute_ema(d["Close"], 50)
         d["EMA200"] = compute_ema(d["Close"], 200)
         d["RSI"]    = compute_rsi(d["Close"])
@@ -334,27 +446,87 @@ def strategy_monthly():
     )
 
 
-def generate_watchlist():
+# =====================================================
+# 🔥 STRATEGY V2 — AI PRO (WALK-FORWARD AWARE)
+# =====================================================
+def strategy_v2(mode="daily"):
     rows = []
+
     for symbol in LATEST_SYMBOLS:
-        d_all = SYMBOL_MAP.get(symbol)
-        if d_all is None:
+        d = SYMBOL_MAP.get(symbol)
+        if d is None:
             continue
 
-        d = d_all.tail(120)
-        if d.empty:
+        # data sufficiency
+        if mode == "daily" and len(d) < 40:
+            continue
+        if mode == "weekly" and len(d) < 150:
+            continue
+        if mode == "monthly" and len(d) < 300:
             continue
 
         latest = d.iloc[-1]
-        ai_score = AI_SCORE_MAP.get(symbol, 0)
+        ai = AI_SCORE_MAP.get(symbol, 0)
 
-        if latest["Bandar"] == "AKUMULASI" and ai_score >= 50:
+        ml_conf = latest.get(
+            f"ml_confidence_label_{mode}",
+            np.nan
+        )
+
+        ml_sig = ml_decision_v2(ml_conf, mode)
+        decision = final_decision_engine(
+            ai_score=ai,
+            ml_signal=ml_sig,
+            bandar=latest["Bandar"]
+        )
+
+        if decision == "WAIT":
+            continue
+
+        rows.append({
+            "Mode": mode.upper() + "_V2",
+            "Saham": symbol,
+            "Harga": round(latest["Close"], 0),
+            "Support": round(latest["Support"], 0),
+            "Resistance": round(latest["Resistance"], 0),
+            "AI Score": ai,
+            "ML Confidence": round(ml_conf, 3) if not pd.isna(ml_conf) else None,
+            "ML Signal": ml_sig,
+            "Bandar": latest["Bandar"],
+            "Decision": decision
+        })
+
+    return (
+        pd.DataFrame(rows)
+        .sort_values(["Decision", "AI Score"], ascending=False)
+        .reset_index(drop=True)
+        if rows else pd.DataFrame()
+    )
+# =====================================================
+# PART 4 — WATCHLIST, HEATMAP, RANKING
+# =====================================================
+
+# =====================================================
+# WATCHLIST — CLASSIC (ASLI)
+# =====================================================
+def generate_watchlist():
+    rows = []
+
+    for symbol in LATEST_SYMBOLS:
+        d = SYMBOL_MAP.get(symbol)
+        if d is None or len(d) < 120:
+            continue
+
+        latest = d.iloc[-1]
+        ai = AI_SCORE_MAP.get(symbol, 0)
+
+        if latest["Bandar"] == "AKUMULASI" and ai >= 50:
             rows.append({
                 "Saham": symbol,
                 "Harga": round(latest["Close"], 0),
                 "Support": round(latest["Support"], 0),
                 "Resistance": round(latest["Resistance"], 0),
-                "AI Score": ai_score
+                "AI Score": ai
             })
 
     return (
@@ -365,14 +537,64 @@ def generate_watchlist():
     )
 
 
-def heatmap_matrix_engine():
+# =====================================================
+# 🔥 WATCHLIST V2 — AI PRO (DECISION BASED)
+# =====================================================
+def generate_watchlist_v2():
     rows = []
+
     for symbol in LATEST_SYMBOLS:
-        d_all = SYMBOL_MAP.get(symbol)
-        if d_all is None:
+        d = SYMBOL_MAP.get(symbol)
+        if d is None or len(d) < 120:
             continue
 
-        latest = d_all.iloc[-1]
+        latest = d.iloc[-1]
+        ai = AI_SCORE_MAP.get(symbol, 0)
+
+        ml_conf = (
+            latest.get("ml_confidence_label_daily")
+            if not pd.isna(latest.get("ml_confidence_label_daily"))
+            else latest.get("ml_confidence_label_weekly")
+        )
+
+        ml_sig = ml_decision_v2(ml_conf, mode="daily")
+        decision = final_decision_engine(
+            ai_score=ai,
+            ml_signal=ml_sig,
+            bandar=latest["Bandar"]
+        )
+
+        if decision in ["BUY", "STRONG_BUY"]:
+            rows.append({
+                "Saham": symbol,
+                "Harga": round(latest["Close"], 0),
+                "AI Score": ai,
+                "ML Signal": ml_sig,
+                "Bandar": latest["Bandar"],
+                "Decision": decision
+            })
+
+    return (
+        pd.DataFrame(rows)
+        .sort_values(["Decision", "AI Score"], ascending=False)
+        .reset_index(drop=True)
+        if rows else pd.DataFrame()
+    )
+
+
+# =====================================================
+# HEATMAP MATRIX — CLASSIC
+# =====================================================
+def heatmap_matrix_engine():
+    rows = []
+
+    for symbol in LATEST_SYMBOLS:
+        d = SYMBOL_MAP.get(symbol)
+        if d is None:
+            continue
+
+        latest = d.iloc[-1]
+
         rows.append({
             "Symbol": symbol,
             "Confidence": AI_SCORE_MAP.get(symbol, 0),
@@ -383,42 +605,137 @@ def heatmap_matrix_engine():
     if dfm.empty:
         return pd.DataFrame()
 
-    dfm["Conf_Level"] = pd.qcut(dfm["Confidence"], 3, labels=["Low", "Mid", "High"])
-    dfm["Vol_Level"]  = pd.qcut(dfm["Volume"], 3, labels=["Low", "Mid", "High"])
+    dfm["Conf_Level"] = pd.qcut(
+        dfm["Confidence"], 3, labels=["Low", "Mid", "High"]
+    )
+    dfm["Vol_Level"] = pd.qcut(
+        dfm["Volume"], 3, labels=["Low", "Mid", "High"]
+    )
 
     return pd.crosstab(dfm["Vol_Level"], dfm["Conf_Level"])
 
 
-def auto_ranking(top_n=10):
+# =====================================================
+# 🔥 HEATMAP MATRIX V2 — DECISION BASED
+# =====================================================
+def heatmap_matrix_v2():
     rows = []
+
     for symbol in LATEST_SYMBOLS:
-        d_all = SYMBOL_MAP.get(symbol)
-        if d_all is None:
+        d = SYMBOL_MAP.get(symbol)
+        if d is None:
             continue
 
-        latest = d_all.iloc[-1]
-        ai_score = AI_SCORE_MAP.get(symbol, 0)
+        latest = d.iloc[-1]
+        ai = AI_SCORE_MAP.get(symbol, 0)
+
+        ml_conf = (
+            latest.get("ml_confidence_label_daily")
+            if not pd.isna(latest.get("ml_confidence_label_daily"))
+            else latest.get("ml_confidence_label_weekly")
+        )
+
+        ml_sig = ml_decision_v2(ml_conf)
+        decision = final_decision_engine(
+            ai_score=ai,
+            ml_signal=ml_sig,
+            bandar=latest["Bandar"]
+        )
 
         rows.append({
-            "Saham": symbol,
-            "AI Score": ai_score,
-            "Harga": round(latest["Close"], 0),
-            "Bandar": latest["Bandar"]
+            "Decision": decision,
+            "Volume": latest["Volume"]
         })
 
-    rank_df = pd.DataFrame(rows)
-    rank_df = rank_df[
-        (rank_df["Bandar"] == "AKUMULASI") &
-        (rank_df["AI Score"] >= 60)
-    ]
+    dfh = pd.DataFrame(rows)
+    if dfh.empty:
+        return pd.DataFrame()
+
+    return pd.crosstab(
+        dfh["Decision"],
+        pd.qcut(dfh["Volume"], 3)
+    )
+
+
+# =====================================================
+# RANKING — CLASSIC
+# =====================================================
+def auto_ranking(top_n=10):
+    rows = []
+
+    for symbol in LATEST_SYMBOLS:
+        d = SYMBOL_MAP.get(symbol)
+        if d is None:
+            continue
+
+        latest = d.iloc[-1]
+        ai = AI_SCORE_MAP.get(symbol, 0)
+
+        if latest["Bandar"] == "AKUMULASI" and ai >= 60:
+            rows.append({
+                "Saham": symbol,
+                "AI Score": ai,
+                "Harga": round(latest["Close"], 0),
+                "Bandar": latest["Bandar"]
+            })
 
     return (
-        rank_df
+        pd.DataFrame(rows)
         .sort_values("AI Score", ascending=False)
         .head(top_n)
         .reset_index(drop=True)
+        if rows else pd.DataFrame()
     )
 
+
+# =====================================================
+# 🔥 RANKING V2 — FULL DECISION ENGINE
+# =====================================================
+def auto_ranking_v2(top_n=15):
+    rows = []
+
+    for symbol in LATEST_SYMBOLS:
+        d = SYMBOL_MAP.get(symbol)
+        if d is None:
+            continue
+
+        latest = d.iloc[-1]
+        ai = AI_SCORE_MAP.get(symbol, 0)
+
+        ml_conf = (
+            latest.get("ml_confidence_label_daily")
+            if not pd.isna(latest.get("ml_confidence_label_daily"))
+            else latest.get("ml_confidence_label_weekly")
+        )
+
+        ml_sig = ml_decision_v2(ml_conf)
+        decision = final_decision_engine(
+            ai_score=ai,
+            ml_signal=ml_sig,
+            bandar=latest["Bandar"]
+        )
+
+        if decision in ["BUY", "STRONG_BUY"]:
+            rows.append({
+                "Saham": symbol,
+                "AI Score": ai,
+                "ML Signal": ml_sig,
+                "Bandar": latest["Bandar"],
+                "Decision": decision
+            })
+
+    return (
+        pd.DataFrame(rows)
+        .sort_values(["Decision", "AI Score"], ascending=False)
+        .head(top_n)
+        .reset_index(drop=True)
+        if rows else pd.DataFrame()
+    )
+
+
+# =====================================================
+# CACHE WRAPPER — CLASSIC & AI PRO
+# =====================================================
 @st.cache_data(show_spinner=False)
 def cached_daily():
     return strategy_daily()
@@ -443,14 +760,53 @@ def cached_heatmap_matrix():
 def cached_ranking(top_n=10):
     return auto_ranking(top_n)
 
-st.sidebar.markdown("<div class='sidebar-logo-wrapper'>", unsafe_allow_html=True)
-if os.path.exists("assets/logo.png"):
-    st.sidebar.image("assets/logo.png", width=290)
-st.sidebar.markdown("</div>", unsafe_allow_html=True)
-st.sidebar.markdown("<div class='sidebar-logo-divider'></div>", unsafe_allow_html=True)
 
-st.sidebar.markdown("### 🧭 Navigasi")
+# =====================================================
+# CACHE — AI PRO (V2)
+# =====================================================
+@st.cache_data(show_spinner=False)
+def cached_daily_v2():
+    return strategy_v2("daily")
 
+@st.cache_data(show_spinner=False)
+def cached_weekly_v2():
+    return strategy_v2("weekly")
+
+@st.cache_data(show_spinner=False)
+def cached_monthly_v2():
+    return strategy_v2("monthly")
+
+@st.cache_data(show_spinner=False)
+def cached_watchlist_v2():
+    return generate_watchlist_v2()
+
+@st.cache_data(show_spinner=False)
+def cached_heatmap_v2():
+    return heatmap_matrix_v2()
+
+@st.cache_data(show_spinner=False)
+def cached_ranking_v2(top_n=15):
+    return auto_ranking_v2(top_n)
+# =====================================================
+# PART 5 — MODE SWITCH & UI ROUTING
+# =====================================================
+
+# =====================================================
+# SIDEBAR — MODE ENGINE
+# =====================================================
+st.sidebar.markdown("### 🤖 Mode Analisa")
+
+analysis_mode = st.sidebar.radio(
+    "Pilih Engine",
+    ["CLASSIC", "AI PRO"],
+    index=1
+)
+
+st.sidebar.markdown("---")
+
+# =====================================================
+# SIDEBAR — NAVIGATION
+# =====================================================
 menu = st.sidebar.radio(
     "Menu Utama",
     [
@@ -466,165 +822,151 @@ menu = st.sidebar.radio(
     index=0
 )
 
-st.sidebar.markdown(
-    "<hr style='border:0;border-top:1px solid rgba(255,255,255,0.15);margin:14px 0;'>",
-    unsafe_allow_html=True
-)
-
-st.sidebar.markdown("### 🎛️ Filter Tampilan")
-
-selected_timeframe = st.sidebar.selectbox(
-    "⏱ Timeframe",
-    ["Daily", "Weekly", "Monthly"],
-    index=0
-)
+st.sidebar.markdown("---")
 
 selected_limit = st.sidebar.slider(
-    "🔢 Jumlah Saham Ditampilkan",
-    5, 50, 10, 5
+    "🔢 Jumlah Saham",
+    min_value=5,
+    max_value=50,
+    value=15,
+    step=5
 )
 
-st.sidebar.markdown(
-    "<hr style='border:0;border-top:1px solid rgba(255,255,255,0.15);margin:14px 0;'>",
-    unsafe_allow_html=True
-)
+# =====================================================
+# ENGINE SELECTOR (TANPA IF BERANTAKAN)
+# =====================================================
+def get_daily_result():
+    if analysis_mode == "AI PRO":
+        return cached_daily_v2()
+    return cached_daily()
 
-st.sidebar.markdown("""
-**SahamAI Enterprise**  
-📊 *AI-powered IDX analytics*
+def get_weekly_result():
+    if analysis_mode == "AI PRO":
+        return cached_weekly_v2()
+    return cached_weekly()
 
-⚠️ Bukan ajakan beli / jual  
-Gunakan sebagai alat bantu analisis
-""")
+def get_monthly_result():
+    if analysis_mode == "AI PRO":
+        return cached_monthly_v2()
+    return cached_monthly()
 
-def heatmap_cards():
-    cards = {"STRONG BUY": [], "BUY / WATCH": [], "WAIT": []}
+def get_watchlist_result():
+    if analysis_mode == "AI PRO":
+        return cached_watchlist_v2()
+    return cached_watchlist()
 
-    for symbol, d in SYMBOL_MAP.items():
-        if len(d) < 30:
-            continue
+def get_heatmap_result():
+    if analysis_mode == "AI PRO":
+        return cached_heatmap_v2()
+    return cached_heatmap_matrix()
 
-        latest = d.iloc[-1]
-        ai = AI_SCORE_MAP.get(symbol, 0)
+def get_ranking_result():
+    if analysis_mode == "AI PRO":
+        return cached_ranking_v2(selected_limit)
+    return cached_ranking(selected_limit)
 
-        ml_conf = (
-            latest.get("ml_confidence_label_daily")
-            if not pd.isna(latest.get("ml_confidence_label_daily"))
-            else latest.get("ml_confidence_label_weekly")
-            if not pd.isna(latest.get("ml_confidence_label_weekly"))
-            else latest.get("ml_confidence_label_monthly")
-        )
-
-        if latest["Bandar"] == "AKUMULASI" and ai >= 75:
-            cards["STRONG BUY"].append((symbol, ai, ml_conf))
-        elif latest["Bandar"] == "AKUMULASI" and ai >= 60:
-            cards["BUY / WATCH"].append((symbol, ai, ml_conf))
-        else:
-            cards["WAIT"].append((symbol, ai, ml_conf))
-
-    return cards
-
+# =====================================================
+# DASHBOARD
+# =====================================================
 if menu == "🏠 Dashboard":
 
-    st.markdown("<div class='section-box'>", unsafe_allow_html=True)
-    st.markdown("### 📊 Market Overview")
-
-    st.markdown(
-        f"<div class='info-bar'>{market_countdown_text()}</div>",
-        unsafe_allow_html=True
-    )
+    st.markdown("## 📊 Market Overview")
 
     latest_all = df.groupby("Symbol").tail(1)
 
-    c1, c2, c3 = st.columns(3)
+    c1, c2, c3, c4 = st.columns(4)
     c1.metric("Total Saham", len(latest_all))
     c2.metric("Akumulasi", (latest_all["Bandar"] == "AKUMULASI").sum())
     c3.metric("Distribusi", (latest_all["Bandar"] == "DISTRIBUSI").sum())
+    c4.metric("Mode Aktif", analysis_mode)
 
-    st.markdown("</div>", unsafe_allow_html=True)
+    st.markdown("### 🔥 Heatmap Decision Engine")
+    heatmap_df = get_heatmap_result()
+    st.dataframe(heatmap_df, use_container_width=True)
 
-    # =========================
-    # HEATMAP
-    # =========================
-
-    st.markdown("<div class='section-box'>", unsafe_allow_html=True)
-    st.markdown("### 🔥 Heatmap Rekomendasi")
-
-    cards = heatmap_cards()
-    col1, col2, col3 = st.columns(3)
-
-    def ml_txt(v): 
-        return f"{v:.2f}" if isinstance(v, (int, float)) else "NA"
-
-    with col1:
-        st.markdown("### 🟢 STRONG BUY")
-        for s, sc, ml in cards["STRONG BUY"][:8]:
-            st.markdown(
-                f"<div class='card card-strong'><b>{s}</b><br>AI: {sc} | ML: {ml_txt(ml)}</div>",
-                unsafe_allow_html=True
-            )
-
-    with col2:
-        st.markdown("### 🟩 BUY / WATCH")
-        for s, sc, ml in cards["BUY / WATCH"][:8]:
-            st.markdown(
-                f"<div class='card card-mid'><b>{s}</b><br>AI: {sc} | ML: {ml_txt(ml)}</div>",
-                unsafe_allow_html=True
-            )
-
-    with col3:
-        st.markdown("### ⚪ WAIT")
-        for s, sc, ml in cards["WAIT"][:8]:
-            st.markdown(
-                f"<div class='card card-low'><b>{s}</b><br>AI: {sc} | ML: {ml_txt(ml)}</div>",
-                unsafe_allow_html=True
-            )
-
-    st.markdown("</div>", unsafe_allow_html=True)
-
+# =====================================================
+# DAILY
+# =====================================================
 elif menu == "📅 Rekomendasi Harian":
     st.subheader("📅 Rekomendasi Harian")
-    df_daily = cached_daily()
+    st.caption(f"Mode: {analysis_mode}")
+    df_daily = get_daily_result()
     st.dataframe(df_daily.head(selected_limit), use_container_width=True)
 
+# =====================================================
+# WEEKLY
+# =====================================================
 elif menu == "📊 Swing Mingguan":
     st.subheader("📊 Swing Mingguan")
-    df_weekly = cached_weekly()
+    st.caption(f"Mode: {analysis_mode}")
+    df_weekly = get_weekly_result()
     st.dataframe(df_weekly.head(selected_limit), use_container_width=True)
 
+# =====================================================
+# MONTHLY
+# =====================================================
 elif menu == "🗓️ Rekomendasi Bulanan":
     st.subheader("🗓️ Rekomendasi Bulanan")
-    df_monthly = cached_monthly()
+    st.caption(f"Mode: {analysis_mode}")
+    df_monthly = get_monthly_result()
     st.dataframe(df_monthly.head(selected_limit), use_container_width=True)
 
+# =====================================================
+# WATCHLIST
+# =====================================================
 elif menu == "⭐ Watchlist":
-    st.subheader("⭐ Watchlist Akumulasi")
-    wl = cached_watchlist()
+    st.subheader("⭐ Watchlist Saham Potensial")
+    wl = get_watchlist_result()
     st.dataframe(wl.head(selected_limit), use_container_width=True)
 
+# =====================================================
+# HEATMAP MATRIX
+# =====================================================
 elif menu == "📊 Heatmap Matrix":
     st.subheader("📊 Heatmap Matrix")
-    matrix = cached_heatmap_matrix()
+    matrix = get_heatmap_result()
     st.dataframe(matrix, use_container_width=True)
 
+# =====================================================
+# RANKING
+# =====================================================
 elif menu == "🤖 Ranking Harian":
-    st.subheader("🤖 Ranking Harian")
-    rank = cached_ranking(selected_limit)
+    st.subheader("🤖 Ranking Saham Terkuat")
+    rank = get_ranking_result()
     st.dataframe(rank, use_container_width=True)
 
+# =====================================================
+# ANALISA 1 SAHAM
+# =====================================================
 elif menu == "🔍 Analisa 1 Saham":
 
     symbol = st.selectbox("Pilih Saham", sorted(SYMBOL_MAP.keys()))
-    d = SYMBOL_MAP[symbol].tail(250)
+    d = SYMBOL_MAP[symbol].tail(300)
 
-    ai = AI_SCORE_MAP.get(symbol, 0)
     latest = d.iloc[-1]
+    ai = AI_SCORE_MAP.get(symbol, 0)
 
-    c1, c2, c3, c4 = st.columns(4)
+    ml_conf = (
+        latest.get("ml_confidence_label_daily")
+        if not pd.isna(latest.get("ml_confidence_label_daily"))
+        else latest.get("ml_confidence_label_weekly")
+        if not pd.isna(latest.get("ml_confidence_label_weekly"))
+        else latest.get("ml_confidence_label_monthly")
+    )
+
+    ml_sig = ml_decision_v2(ml_conf)
+    decision = final_decision_engine(
+        ai_score=ai,
+        ml_signal=ml_sig,
+        bandar=latest["Bandar"]
+    )
+
+    c1, c2, c3, c4, c5 = st.columns(5)
     c1.metric("Harga", f"{latest['Close']:.0f}")
     c2.metric("Bandar", latest["Bandar"])
     c3.metric("AI Score", ai)
-    c4.metric("Volume", f"{latest['Volume']:,}")
+    c4.metric("ML Signal", ml_sig)
+    c5.metric("Decision", decision)
 
     st.markdown("### 📈 Grafik Candlestick")
 
@@ -639,8 +981,179 @@ elif menu == "🔍 Analisa 1 Saham":
     )
     st.pyplot(fig)
 
+# =====================================================
+# FOOTER
+# =====================================================
 st.markdown("""
 ---
 © 2026 **SahamAI Enterprise**  
-Green • Quant • IDX • AI Powered
+Green • Quant • IDX • AI Powered  
+Mode Engine: **CLASSIC / AI PRO**
 """)
+
+# =====================================================
+# PART 6 — BACKTEST ENGINE (PnL BASED)
+# =====================================================
+
+# =====================================================
+# CONFIG BACKTEST
+# =====================================================
+TAKE_PROFIT = 0.05     # +5%
+STOP_LOSS   = 0.03     # -3%
+MAX_HOLD    = 10       # max 10 hari
+
+# =====================================================
+# CORE BACKTEST FUNCTION
+# =====================================================
+def backtest_single_symbol(
+    df,
+    decision_col="Decision",
+    price_col="Close"
+):
+    """
+    Backtest sederhana & jujur:
+    - Entry saat BUY / STRONG_BUY
+    - Exit via TP / SL / Max Hold
+    """
+    trades = []
+
+    df = df.copy().reset_index(drop=True)
+
+    for i in range(len(df) - MAX_HOLD - 1):
+
+        row = df.iloc[i]
+        decision = row.get(decision_col)
+
+        if decision not in ["BUY", "STRONG_BUY"]:
+            continue
+
+        entry_price = row[price_col]
+        entry_date  = row["Tanggal Perdagangan Terakhir"]
+
+        exit_price = entry_price
+        exit_date  = entry_date
+        result     = 0
+
+        for j in range(1, MAX_HOLD + 1):
+            future = df.iloc[i + j]
+            ret = (future[price_col] - entry_price) / entry_price
+
+            if ret >= TAKE_PROFIT:
+                exit_price = future[price_col]
+                exit_date  = future["Tanggal Perdagangan Terakhir"]
+                result     = TAKE_PROFIT
+                break
+
+            if ret <= -STOP_LOSS:
+                exit_price = future[price_col]
+                exit_date  = future["Tanggal Perdagangan Terakhir"]
+                result     = -STOP_LOSS
+                break
+
+        trades.append({
+            "entry_date": entry_date,
+            "exit_date": exit_date,
+            "entry": entry_price,
+            "exit": exit_price,
+            "return": result
+        })
+
+    if not trades:
+        return None
+
+    return pd.DataFrame(trades)
+
+# =====================================================
+# BACKTEST ALL SYMBOLS (AI PRO)
+# =====================================================
+@st.cache_data(show_spinner=True)
+def run_backtest_ai_pro():
+    all_trades = []
+
+    for symbol in LATEST_SYMBOLS:
+        d = SYMBOL_MAP.get(symbol)
+        if d is None or len(d) < 300:
+            continue
+
+        d = d.copy()
+
+        # build decision per bar
+        d["ML_CONF"] = (
+            d["ml_confidence_label_daily"]
+            .fillna(d["ml_confidence_label_weekly"])
+            .fillna(d["ml_confidence_label_monthly"])
+        )
+
+        d["ML_SIGNAL"] = d["ML_CONF"].apply(ml_decision_v2)
+
+        d["Decision"] = d.apply(
+            lambda r: final_decision_engine(
+                ai_score=AI_SCORE_MAP.get(symbol, 0),
+                ml_signal=r["ML_SIGNAL"],
+                bandar=r["Bandar"]
+            ),
+            axis=1
+        )
+
+        trades = backtest_single_symbol(d)
+
+        if trades is None or trades.empty:
+            continue
+
+        trades["Symbol"] = symbol
+        all_trades.append(trades)
+
+    if not all_trades:
+        return pd.DataFrame()
+
+    return pd.concat(all_trades).reset_index(drop=True)
+
+# =====================================================
+# METRICS
+# =====================================================
+def backtest_metrics(trades):
+    total_trades = len(trades)
+    wins = trades[trades["return"] > 0]
+    losses = trades[trades["return"] < 0]
+
+    winrate = len(wins) / total_trades if total_trades else 0
+    avg_pnl = trades["return"].mean() if total_trades else 0
+
+    equity = trades["return"].cumsum()
+    max_dd = (equity.cummax() - equity).max()
+
+    return {
+        "Trades": total_trades,
+        "Winrate": round(winrate, 3),
+        "Avg PnL": round(avg_pnl, 4),
+        "Max Drawdown": round(max_dd, 4),
+        "Total Return": round(equity.iloc[-1], 4) if total_trades else 0
+    }
+
+# =====================================================
+# UI — BACKTEST PAGE
+# =====================================================
+if menu == "🧪 Backtest AI PRO":
+
+    st.subheader("🧪 Backtest AI PRO — PnL Based")
+
+    trades = run_backtest_ai_pro()
+
+    if trades.empty:
+        st.warning("❌ Tidak ada trade terdeteksi.")
+    else:
+        metrics = backtest_metrics(trades)
+
+        c1, c2, c3, c4, c5 = st.columns(5)
+        c1.metric("Trades", metrics["Trades"])
+        c2.metric("Winrate", f"{metrics['Winrate']*100:.1f}%")
+        c3.metric("Avg PnL", f"{metrics['Avg PnL']*100:.2f}%")
+        c4.metric("Max DD", f"{metrics['Max Drawdown']*100:.2f}%")
+        c5.metric("Total Return", f"{metrics['Total Return']*100:.2f}%")
+
+        st.markdown("### 📈 Equity Curve")
+        trades["equity"] = trades["return"].cumsum()
+        st.line_chart(trades["equity"])
+
+        st.markdown("### 📋 Trade Log")
+        st.dataframe(trades.tail(200), use_container_width=True)
