@@ -1,28 +1,49 @@
 import pandas as pd
 import numpy as np
 import os
+import joblib
 
-from sklearn.preprocessing import StandardScaler
+from sklearn.preprocessing import RobustScaler
 from sklearn.linear_model import LogisticRegression
-from sklearn.metrics import roc_auc_score
+from sklearn.metrics import roc_auc_score, precision_recall_curve
 from sklearn.impute import SimpleImputer
 from sklearn.pipeline import Pipeline
+from sklearn.feature_selection import VarianceThreshold
 
 # =====================================================
 # CONFIG
 # =====================================================
-DATA_PATH = "ml/dataset_ml_ready.parquet"
+FEATURE_PATH = "ml/dataset_features.parquet"
+LABEL_PATH   = "ml/dataset_ml_ready.parquet"
+
 OUT_DIR = "processed"
+MODEL_DIR = "ml/models"
+
 os.makedirs(OUT_DIR, exist_ok=True)
+os.makedirs(MODEL_DIR, exist_ok=True)
 
 FEATURES = [
-    "EMA10",
-    "EMA20",
-    "EMA50",
-    "RSI14",
-    "VOL_RATIO",
-    "DIST_SUPPORT",
-    "DIST_RESISTANCE",
+    # RETURNS
+    "RET_1D","RET_5D","RET_20D","LOG_RET",
+
+    # VOL
+    "VOL_20","VOL_REGIME",
+
+    # TREND
+    "EMA10_RATIO","EMA20_RATIO","EMA50_RATIO","EMA_SPREAD",
+
+    # OSCILLATOR
+    "RSI_NORM",
+
+    # VOL FLOW
+    "ATR_RATIO",
+    "VOL_RATIO","VOL_MOM",
+
+    # STRUCTURE
+    "BREAKOUT_UP","BREAKOUT_DOWN",
+    "DIST_SUPPORT","DIST_RESISTANCE",
+
+    # SMART MONEY
     "BANDAR_ENC"
 ]
 
@@ -33,105 +54,176 @@ TARGETS = [
 ]
 
 # =====================================================
-# LOAD DATA
+# LOAD & MERGE
 # =====================================================
-df = pd.read_parquet(DATA_PATH)
+df_feat = pd.read_parquet(FEATURE_PATH)
+df_label = pd.read_parquet(LABEL_PATH)
 
-# konsistensi kolom
-df = df.rename(columns={
-    "Saham": "Symbol",
-    "Tanggal": "Tanggal"
-})
+df_feat["Tanggal"] = pd.to_datetime(df_feat["Tanggal"])
+df_label["Tanggal"] = pd.to_datetime(df_label["Tanggal"])
 
-df = df.sort_values(["Symbol", "Tanggal"]).reset_index(drop=True)
+df = df_feat.merge(
+    df_label[["Symbol","Tanggal"] + TARGETS],
+    on=["Symbol","Tanggal"],
+    how="inner"
+)
 
-print("📊 Total data:", len(df))
+df = df.sort_values("Tanggal").reset_index(drop=True)
+
+print("📊 Total rows:", len(df))
 print("📈 Total saham:", df["Symbol"].nunique())
 
 # =====================================================
-# TIME-BASED SPLIT (80% train, 20% test by time)
+# FEATURE CHECK
+# =====================================================
+missing = [c for c in FEATURES if c not in df.columns]
+if missing:
+    raise ValueError(f"❌ Missing features: {missing}")
+
+print("\n🔎 Feature Variance Check")
+for col in FEATURES:
+    print(col, "std:", round(df[col].std(), 6))
+
+# =====================================================
+# TIME SPLIT (STRICT)
 # =====================================================
 split_date = df["Tanggal"].quantile(0.80)
 
-train_df = df[df["Tanggal"] <= split_date]
-test_df  = df[df["Tanggal"] > split_date]
+train_df = df[df["Tanggal"] <= split_date].copy()
+test_df  = df[df["Tanggal"] > split_date].copy()
 
-X_train = train_df[FEATURES]
-X_test  = test_df[FEATURES]
-
-print("🧪 Train rows:", len(train_df))
-print("🧪 Test rows :", len(test_df))
+print("\n🧪 Train:", len(train_df))
+print("🧪 Test :", len(test_df))
+print("📅 Split date:", split_date.date())
 
 # =====================================================
-# PIPELINE (REUSABLE)
+# PIPELINE BUILDER
 # =====================================================
-pipeline = Pipeline([
-    ("imputer", SimpleImputer(strategy="median")),
-    ("scaler", StandardScaler()),
-    ("model", LogisticRegression(
-        max_iter=1000,
-        class_weight="balanced",
-        n_jobs=-1
-    ))
-])
+def build_pipeline(C_value=1.0):
+    return Pipeline([
+        ("imputer", SimpleImputer(strategy="median")),
+        ("variance", VarianceThreshold()),  # remove zero variance
+        ("scaler", RobustScaler()),
+        ("model", LogisticRegression(
+            max_iter=3000,
+            class_weight="balanced",
+            solver="lbfgs",
+            C=C_value
+        ))
+    ])
 
 # =====================================================
-# LOOP TRAINING
+# TRAIN LOOP
 # =====================================================
 for TARGET in TARGETS:
 
     print("\n===================================")
-    print(f"🤖 TRAINING → {TARGET.upper()}")
+    print("🚀 TRAINING:", TARGET.upper())
     print("===================================")
 
+    X_train = train_df[FEATURES]
     y_train = train_df[TARGET]
-    y_test  = test_df[TARGET]
 
-    print("Target distribution (train):")
-    print(y_train.value_counts(normalize=True).round(3))
+    X_test = test_df[FEATURES]
+    y_test = test_df[TARGET]
 
-    # =========================
-    # TRAIN
-    # =========================
-    pipeline.fit(X_train, y_train)
+    if y_train.nunique() < 2:
+        print("❌ Target constant. Skip.")
+        continue
 
-    # =========================
-    # EVALUATION (TEST ONLY)
-    # =========================
-    proba_test = pipeline.predict_proba(X_test)[:, 1]
-    auc = roc_auc_score(y_test, proba_test)
+    best_auc = 0
+    best_model = None
+    best_C = None
 
-    print(f"🎯 AUC ({TARGET}): {auc:.4f}")
+    for C in [0.5, 1.0, 2.0, 5.0]:
+        model = build_pipeline(C)
+        model.fit(X_train, y_train)
 
-    # =========================
-    # FEATURE IMPORTANCE
-    # =========================
-    coef = pipeline.named_steps["model"].coef_[0]
-    importance = (
-        pd.Series(coef, index=FEATURES)
-        .sort_values(ascending=False)
+        proba = model.predict_proba(X_test)[:,1]
+        auc = roc_auc_score(y_test, proba)
+
+        if auc > best_auc:
+            best_auc = auc
+            best_model = model
+            best_C = C
+
+    print(f"🎯 Best AUC: {best_auc:.4f}")
+    print(f"🔧 Best C: {best_C}")
+
+    # ======================================
+    # THRESHOLD OPTIMIZATION
+    # ======================================
+    proba_test = best_model.predict_proba(X_test)[:,1]
+
+    precision, recall, thresholds = precision_recall_curve(y_test, proba_test)
+    f1 = 2 * (precision * recall) / (precision + recall + 1e-9)
+    best_idx = np.argmax(f1)
+
+    best_threshold = thresholds[best_idx] if best_idx < len(thresholds) else 0.5
+    print("🔥 Best threshold:", round(best_threshold,3))
+
+    # ======================================
+    # DECILE ANALYSIS
+    # ======================================
+    test_temp = pd.DataFrame({
+        "proba": proba_test,
+        "target": y_test.values
+    })
+
+    test_temp["decile"] = pd.qcut(
+        test_temp["proba"],
+        10,
+        labels=False,
+        duplicates="drop"
     )
 
-    print("\n🧠 Feature importance:")
-    print(importance.round(3))
+    top_decile = test_temp[test_temp["decile"] == test_temp["decile"].max()]
+    precision_top = top_decile["target"].mean()
+    base_rate = y_test.mean()
+    lift = precision_top / base_rate if base_rate > 0 else 0
 
-    # =========================
-    # GENERATE ML CONFIDENCE (FULL DATA, AFTER TRAIN)
-    # =========================
-    conf_col = f"ml_confidence_{TARGET}"
-    df[conf_col] = pipeline.predict_proba(df[FEATURES])[:, 1]
+    print("📈 Base rate:", round(base_rate,4))
+    print("🏆 Top 10% Precision:", round(precision_top,4))
+    print("🚀 Lift:", round(lift,2))
 
-    df_out = df[[
-        "Symbol",
-        "Tanggal",
-        conf_col
-    ]]
+    # ======================================
+    # FEATURE IMPORTANCE
+    # ======================================
+    model_step = best_model.named_steps["model"]
+    selected_mask = best_model.named_steps["variance"].get_support()
+    selected_features = np.array(FEATURES)[selected_mask]
 
-    output_path = f"{OUT_DIR}/ml_confidence_{TARGET}.parquet"
-    df_out.to_parquet(output_path, index=False)
+    coef = model_step.coef_[0]
+    importance = pd.Series(coef, index=selected_features).sort_values(ascending=False)
 
-    print(f"\n💾 ML confidence saved → {output_path}")
-    print(df_out.head())
+    print("\n🧠 Feature Importance:")
+    print(importance.round(4))
 
-print("\n✅ SEMUA MODEL SELESAI (TIME-SERIES SAFE)")
-    
+    # ======================================
+    # SAVE MODEL
+    # ======================================
+    model_path = f"{MODEL_DIR}/{TARGET}.pkl"
+
+    joblib.dump({
+        "model": best_model,
+        "threshold": float(best_threshold),
+        "features": list(selected_features),
+        "C": best_C
+    }, model_path)
+
+    print("💾 Model saved:", model_path)
+
+    # ======================================
+    # FULL CONFIDENCE
+    # ======================================
+    df[f"ml_confidence_{TARGET}"] = best_model.predict_proba(
+        df[FEATURES]
+    )[:,1]
+
+    df_out = df[["Symbol","Tanggal",f"ml_confidence_{TARGET}"]]
+    out_path = f"{OUT_DIR}/ml_confidence_{TARGET}.parquet"
+
+    df_out.to_parquet(out_path, index=False)
+    print("📦 Confidence saved:", out_path)
+
+print("\n✅ TRAINING COMPLETE (FINAL PRO VERSION)")

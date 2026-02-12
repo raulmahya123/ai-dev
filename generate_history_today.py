@@ -1,6 +1,7 @@
 import pandas as pd
 import os
-from datetime import date, datetime
+from datetime import date
+import uuid
 
 # =====================================================
 # 1. KONFIGURASI
@@ -9,19 +10,25 @@ DATA_PATH = "processed/daily_clean.parquet"
 HIST_PATH = "processed/recommendation_history.parquet"
 
 os.makedirs("processed", exist_ok=True)
-today = pd.to_datetime(date.today())
+today = pd.Timestamp(date.today())
 
 # =====================================================
 # 2. LOAD DATA UTAMA
 # =====================================================
 df = pd.read_parquet(DATA_PATH)
 
-# pastikan kolom tanggal konsisten
+# Pastikan kolom tanggal konsisten
 if "Tanggal" not in df.columns:
-    df["Tanggal"] = pd.to_datetime(df["Tanggal Perdagangan Terakhir"])
+    if "Tanggal Perdagangan Terakhir" in df.columns:
+        df["Tanggal"] = pd.to_datetime(
+            df["Tanggal Perdagangan Terakhir"],
+            errors="coerce"
+        )
+
+df["Tanggal"] = pd.to_datetime(df["Tanggal"], errors="coerce")
 
 # =====================================================
-# 3. AMBIL DATA TERAKHIR PER SAHAM (EFISIEN)
+# 3. AMBIL DATA TERAKHIR PER SAHAM
 # =====================================================
 df = df.sort_values(["Symbol", "Tanggal"])
 
@@ -40,54 +47,68 @@ candidates = latest[
 ].copy()
 
 # =====================================================
-# 5. BANGUN REKOMENDASI
+# 5. LOAD HISTORY (PASTIKAN ADA)
 # =====================================================
-if not candidates.empty:
-    candidates["Tanggal"] = today
-    candidates["Mode"] = "Harian (BPJS / BSJP)"
-    candidates["Status"] = "OPEN"
-    candidates["Entry"] = candidates["Close"].round(0)
-    candidates["TP"] = (candidates["Close"] * 1.03).round(0)
-    candidates["SL"] = (candidates["Close"] * 0.97).round(0)
-    candidates["RR"] = (
-        (candidates["TP"] - candidates["Entry"]) /
-        (candidates["Entry"] - candidates["SL"])
-    ).round(2)
-    candidates["Catatan"] = "Akumulasi bandar & dekat support"
+if os.path.exists(HIST_PATH):
+    hist = pd.read_parquet(HIST_PATH)
+else:
+    hist = pd.DataFrame(columns=[
+        "RecID","Tanggal","Mode","Symbol","Status",
+        "Entry","TP","SL","RR","Catatan"
+    ])
 
-    rec_today = candidates[[
-        "Tanggal", "Mode", "Symbol", "Status",
-        "Entry", "TP", "SL", "RR", "Catatan"
-    ]].rename(columns={"Symbol": "Saham"})
+# =====================================================
+# 6. BANGUN REKOMENDASI
+# =====================================================
+rows = []
+
+if not candidates.empty:
+
+    for _, row in candidates.iterrows():
+
+        entry = round(row["Close"], 0)
+        tp = round(row["Close"] * 1.03, 0)
+        sl = round(row["Close"] * 0.97, 0)
+
+        risk = entry - sl
+        reward = tp - entry
+        rr = round(reward / risk, 2) if risk > 0 else None
+
+        rows.append({
+            "RecID": f"REC-{uuid.uuid4().hex[:8].upper()}",
+            "Tanggal": today,
+            "Mode": "DAY",
+            "Symbol": row["Symbol"],
+            "Status": "OPEN",
+            "Entry": entry,
+            "TP": tp,
+            "SL": sl,
+            "RR": rr,
+            "Catatan": "Akumulasi bandar & dekat support"
+        })
 
 else:
-    # =================================================
-    # 6. JIKA TIDAK ADA SETUP
-    # =================================================
-    rec_today = pd.DataFrame([{
+    rows.append({
+        "RecID": f"REC-{uuid.uuid4().hex[:8].upper()}",
         "Tanggal": today,
-        "Mode": "Harian (BPJS / BSJP)",
-        "Saham": "-",
+        "Mode": "DAY",
+        "Symbol": "-",
         "Status": "NO TRADE",
         "Entry": None,
         "TP": None,
         "SL": None,
         "RR": None,
         "Catatan": "Tidak ada setup ideal hari ini"
-    }])
+    })
+
+rec_today = pd.DataFrame(rows)
 
 # =====================================================
-# 7. LOAD HISTORY & APPEND (ANTI OVERWRITE)
+# 7. HAPUS REKOMENDASI HARI INI (ANTI DOBEL)
 # =====================================================
-if os.path.exists(HIST_PATH):
-    hist = pd.read_parquet(HIST_PATH)
+hist = hist[hist["Tanggal"] != today]
 
-    # hapus rekomendasi hari ini (anti dobel)
-    hist = hist[hist["Tanggal"] != today]
-
-    final = pd.concat([hist, rec_today], ignore_index=True)
-else:
-    final = rec_today
+final = pd.concat([hist, rec_today], ignore_index=True)
 
 # =====================================================
 # 8. SIMPAN
@@ -99,5 +120,5 @@ final.to_parquet(HIST_PATH, index=False)
 # =====================================================
 print("✅ recommendation_history.parquet UPDATE BERHASIL")
 print(f"📅 Tanggal      : {today.date()}")
-print(f"📈 Total setup  : {(final['Status'] == 'OPEN').sum()}")
-print(f"🟡 NO TRADE row : {(final['Status'] == 'NO TRADE').sum()}")
+print(f"📈 Total setup  : {(rec_today['Status'] == 'OPEN').sum()}")
+print(f"🟡 NO TRADE row : {(rec_today['Status'] == 'NO TRADE').sum()}")

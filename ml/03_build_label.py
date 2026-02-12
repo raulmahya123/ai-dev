@@ -2,99 +2,75 @@ import pandas as pd
 import numpy as np
 import os
 
-# =====================================================
-# PATH
-# =====================================================
 DATA_PATH = "ml/dataset_features.parquet"
 OUTPUT_PATH = "ml/dataset_ml_ready.parquet"
+
 os.makedirs("ml", exist_ok=True)
 
 # =====================================================
-# LOAD DATA
+# LOAD
 # =====================================================
 df = pd.read_parquet(DATA_PATH)
 
-# konsistensi & sorting
-df = df.sort_values(["Saham", "Tanggal"]).reset_index(drop=True)
+if "Close" not in df.columns:
+    raise ValueError("❌ Column 'Close' not found in dataset_features.parquet")
+
+df["Tanggal"] = pd.to_datetime(df["Tanggal"])
+df = df.sort_values(["Symbol","Tanggal"]).reset_index(drop=True)
+
+grp = df.groupby("Symbol", group_keys=False)
 
 # =====================================================
-# GROUP
+# DAILY
 # =====================================================
-grp = df.groupby("Saham")
+df["RET_1D_FWD"] = grp["Close"].shift(-1) / df["Close"] - 1
+df["label_daily"] = (df["RET_1D_FWD"] > 0).astype(int)
 
 # =====================================================
-# 1️⃣ DAILY LABEL (next-day up)
+# WEEKLY
 # =====================================================
-df["close_next"] = grp["Close"].shift(-1)
+df["FWD_MAX_5"] = grp["Close"].transform(
+    lambda x: x.shift(-1).rolling(5, min_periods=5).max()
+)
 
-df["label_daily"] = (
-    df["close_next"] > df["Close"]
-).astype(int)
-
-# =====================================================
-# 2️⃣ WEEKLY LABEL (Swing ±5 hari, +5%)
-# =====================================================
-df["future_max_5"] = grp["Close"].shift(-1).rolling(
-    window=5, min_periods=5
-).max()
+df["FWD_MIN_5"] = grp["Close"].transform(
+    lambda x: x.shift(-1).rolling(5, min_periods=5).min()
+)
 
 df["label_weekly"] = (
-    df["future_max_5"] >= df["Close"] * 1.05
+    (df["FWD_MAX_5"] >= df["Close"] * 1.05) &
+    (df["FWD_MIN_5"] > df["Close"] * 0.90)
 ).astype(int)
 
 # =====================================================
-# 3️⃣ MONTHLY LABEL (Position ±20 hari, +20%)
+# MONTHLY
 # =====================================================
-df["future_max_20"] = grp["Close"].shift(-1).rolling(
-    window=20, min_periods=20
-).max()
+df["FWD_MAX_20"] = grp["Close"].transform(
+    lambda x: x.shift(-1).rolling(20, min_periods=20).max()
+)
 
 df["label_monthly"] = (
-    df["future_max_20"] >= df["Close"] * 1.20
+    df["FWD_MAX_20"] >= df["Close"] * 1.20
 ).astype(int)
 
 # =====================================================
-# OPTIONAL: DOWNSIDE FILTER (ANTI FAKE BREAKOUT)
-# Max drawdown 10% dalam horizon
-# =====================================================
-df["future_min_5"] = grp["Close"].shift(-1).rolling(
-    window=5, min_periods=5
-).min()
-
-df.loc[
-    df["future_min_5"] <= df["Close"] * 0.90,
-    "label_weekly"
-] = 0
-
-# =====================================================
-# CLEANING (BUANG ROW AKHIR TIAP SAHAM)
+# CLEAN (REMOVE TAIL ROWS WITHOUT HORIZON)
 # =====================================================
 df = df.dropna(subset=[
-    "label_daily",
-    "label_weekly",
-    "label_monthly"
+    "RET_1D_FWD",
+    "FWD_MAX_5",
+    "FWD_MAX_20"
 ])
 
-# =====================================================
-# DROP HELPER COLUMNS
-# =====================================================
 df = df.drop(columns=[
-    "close_next",
-    "future_max_5",
-    "future_max_20",
-    "future_min_5"
+    "RET_1D_FWD",
+    "FWD_MAX_5",
+    "FWD_MIN_5",
+    "FWD_MAX_20"
 ])
 
-# =====================================================
-# SAVE
-# =====================================================
 df.to_parquet(OUTPUT_PATH, index=False)
 
-# =====================================================
-# LOG
-# =====================================================
-print("✅ ML LABELING SELESAI")
-print("📦 Output :", OUTPUT_PATH)
-print("📊 Baris :", f"{len(df):,}")
-print("\n📈 Label Mean (positif ratio)")
-print(df[["label_daily", "label_weekly", "label_monthly"]].mean().round(3))
+print("✅ LABEL BUILD COMPLETE")
+print("Rows:", len(df))
+print(df[["label_daily","label_weekly","label_monthly"]].mean())

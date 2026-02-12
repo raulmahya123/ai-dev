@@ -52,8 +52,8 @@ for file in files:
 
     # --- VALIDASI KOLOM WAJIB ---
     required_cols = [
+        "Kode Saham",
         "Tanggal Perdagangan Terakhir",
-        "Nama Perusahaan",
         "Open Price",
         "Tertinggi",
         "Terendah",
@@ -71,16 +71,16 @@ for file in files:
     df["Tanggal"] = df["Tanggal Perdagangan Terakhir"].apply(parse_tanggal_indo)
     df = df.dropna(subset=["Tanggal"])
 
-    # --- RENAME KOLOM ---
-    df = df.rename(
-        columns={
-            "Nama Perusahaan": "Symbol",
-            "Open Price": "Open",
-            "Tertinggi": "High",
-            "Terendah": "Low",
-            "Penutupan": "Close",
-        }
-    )
+    # --- RENAME KOLOM (STANDARD SCHEMA) ---
+    df = df.rename(columns={
+        "Kode Saham": "Symbol",
+        "Open Price": "Open",
+        "Tertinggi": "High",
+        "Terendah": "Low",
+        "Penutupan": "Close",
+        "Foreign Buy": "Foreign_Buy",
+        "Foreign Sell": "Foreign_Sell",
+    })
 
     # --- CAST NUMERIC ---
     numeric_cols = [
@@ -89,9 +89,10 @@ for file in files:
         "Low",
         "Close",
         "Volume",
-        "Foreign Buy",
-        "Foreign Sell",
+        "Foreign_Buy",
+        "Foreign_Sell",
     ]
+
     df[numeric_cols] = df[numeric_cols].apply(
         pd.to_numeric, errors="coerce"
     )
@@ -109,18 +110,23 @@ data = data.sort_values(
     ["Symbol", "Tanggal"]
 ).reset_index(drop=True)
 
+# Hapus duplicate kolom kalau ada
+data = data.loc[:, ~data.columns.duplicated()]
+
 # =====================================================
 # 5. DETEKSI BANDAR (FOREIGN FLOW)
 # =====================================================
-def classify_bandar(row):
-    if row["Foreign Buy"] > row["Foreign Sell"]:
-        return "AKUMULASI"
-    elif row["Foreign Sell"] > row["Foreign Buy"]:
-        return "DISTRIBUSI"
-    else:
-        return "NETRAL"
+data["Bandar"] = "NETRAL"
 
-data["Bandar"] = data.apply(classify_bandar, axis=1)
+data.loc[
+    data["Foreign_Buy"] > data["Foreign_Sell"],
+    "Bandar"
+] = "AKUMULASI"
+
+data.loc[
+    data["Foreign_Sell"] > data["Foreign_Buy"],
+    "Bandar"
+] = "DISTRIBUSI"
 
 # =====================================================
 # 6. SUPPORT & RESISTANCE (ROLLING 20 HARI)
@@ -140,7 +146,7 @@ data["Resistance"] = (
 )
 
 # =====================================================
-# 7. SIGNAL BUY + TP / SL (SWING TRADING)
+# 7. SIGNAL BUY + TP / SL
 # =====================================================
 data["BUY"] = (
     (data["Close"] <= data["Support"] * 1.02)
@@ -151,13 +157,13 @@ data["TP"] = (data["Close"] * 1.07).round(2)
 data["SL"] = (data["Close"] * 0.95).round(2)
 
 # =====================================================
-# 8. SIMPAN KE PARQUET
+# 8. SIMPAN
 # =====================================================
 os.makedirs("processed", exist_ok=True)
 data.to_parquet(OUT_PATH, index=False)
 
 # =====================================================
-# 9. RINGKASAN OUTPUT
+# 9. RINGKASAN
 # =====================================================
 print("\n✅ PREPROCESS SELESAI")
 print(f"📦 File      : {OUT_PATH}")

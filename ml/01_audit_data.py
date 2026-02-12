@@ -1,97 +1,143 @@
 import pandas as pd
 import numpy as np
-
-DATA_PATH = "processed/daily_clean.parquet"
-
-# =====================================================
-# 1. LOAD DATA
-# =====================================================
-df = pd.read_parquet(DATA_PATH)
-
-print("📦 FILE :", DATA_PATH)
-print("📊 TOTAL BARIS :", f"{len(df):,}")
-print("📈 TOTAL SAHAM :", df["Symbol"].nunique())
+import os
 
 # =====================================================
-# 2. INFO STRUKTUR DATA
+# CONFIG
 # =====================================================
-print("\n🧱 STRUKTUR KOLOM")
-print(df.dtypes)
+INPUT_PATH = "processed/daily_clean.parquet"
+OUTPUT_PATH = "processed/daily_clean_strict.parquet"
+
+os.makedirs("processed", exist_ok=True)
+
+print("="*70)
+print("📦 DATA AUDIT & CLEAN PIPELINE (PRO VERSION)")
+print("="*70)
 
 # =====================================================
-# 3. CEK DATA KOSONG & ANOMALI
+# LOAD
 # =====================================================
-print("\n🧼 DATA QUALITY CHECK")
+df = pd.read_parquet(INPUT_PATH)
 
-nulls = df.isnull().sum()
-nulls = nulls[nulls > 0]
-
-if nulls.empty:
-    print("✅ Tidak ada nilai NULL penting")
-else:
-    print("⚠️ Kolom dengan NULL:")
-    print(nulls)
-
-# harga aneh
-price_issues = df[
-    (df["Close"] <= 0) |
-    (df["High"] < df["Low"]) |
-    (df["Open"] <= 0)
-]
-
-print("\n💣 ANOMALI HARGA :", len(price_issues))
+print("📊 RAW ROWS:", f"{len(df):,}")
+print("📈 TOTAL SAHAM:", df["Symbol"].nunique())
 
 # =====================================================
-# 4. COVERAGE WAKTU
+# STANDARDIZE DATA TYPES
 # =====================================================
-print("\n🕒 RENTANG DATA")
-print("Mulai :", df["Tanggal"].min())
-print("Akhir :", df["Tanggal"].max())
+df["Tanggal"] = pd.to_datetime(df["Tanggal"], errors="coerce")
+df = df.dropna(subset=["Symbol","Tanggal","Close"])
+
+df = df.sort_values(["Symbol","Tanggal"]).reset_index(drop=True)
 
 # =====================================================
-# 5. RINGKASAN BANDAR
+# 1️⃣ REMOVE DUPLICATE SYMBOL-DATE
 # =====================================================
-print("\n🏦 KOMPOSISI BANDAR")
-print(df["Bandar"].value_counts(normalize=True).round(3))
+before = len(df)
+df = df.drop_duplicates(subset=["Symbol","Tanggal"], keep="last")
+print("🧹 Removed duplicate Symbol-Date:", before - len(df))
 
 # =====================================================
-# 6. SIGNAL SUMMARY
+# 2️⃣ REMOVE INVALID PRICE
 # =====================================================
-print("\n🟢 BUY SIGNAL SUMMARY")
-print("Total BUY :", df["BUY"].sum())
-print(
-    "BUY Ratio :",
-    round(df["BUY"].sum() / len(df) * 100, 2),
-    "%"
+valid_price = (
+    (df["Close"] > 0) &
+    (df["Open"] > 0) &
+    (df["High"] > 0) &
+    (df["Low"] > 0) &
+    (df["High"] >= df["Low"])
 )
 
-# =====================================================
-# 7. SUPPORT / RESISTANCE VALIDATION
-# =====================================================
-sr_issue = df[
-    (df["Support"] > df["Close"]) |
-    (df["Resistance"] < df["Close"])
-]
-
-print("\n📐 SR VALIDATION ISSUE :", len(sr_issue))
+before = len(df)
+df = df[valid_price]
+print("💣 Removed invalid price rows:", before - len(df))
 
 # =====================================================
-# 8. STATISTIK CEPAT (BENERAN KEPAKAI)
+# 3️⃣ REMOVE ZERO VOLUME
 # =====================================================
-print("\n📊 STATISTIK HARGA (Close)")
+before = len(df)
+df = df[df["Volume"] > 0]
+print("📦 Removed zero volume rows:", before - len(df))
+
+# =====================================================
+# 4️⃣ EXTREME RETURN FILTER (> ±50%)
+# =====================================================
+df["ret_1d"] = df.groupby("Symbol")["Close"].pct_change()
+
+before = len(df)
+df = df[np.abs(df["ret_1d"]) <= 0.5]
+print("📉 Removed extreme return rows:", before - len(df))
+
+# =====================================================
+# 5️⃣ LOG-BASED OUTLIER FILTER (ROBUST)
+# =====================================================
+df["log_close"] = np.log(df["Close"])
+z = (df["log_close"] - df["log_close"].mean()) / df["log_close"].std()
+
+before = len(df)
+df = df[np.abs(z) <= 6]
+print("📊 Removed extreme price outliers:", before - len(df))
+
+df = df.drop(columns=["log_close"], errors="ignore")
+
+# =====================================================
+# 6️⃣ SUPPORT / RESISTANCE VALIDATION
+# =====================================================
+if "Support" in df.columns and "Resistance" in df.columns:
+
+    valid_sr = (
+        df["Support"].isna() |
+        df["Resistance"].isna() |
+        (
+            (df["Support"] <= df["Low"]) &
+            (df["Resistance"] >= df["High"])
+        )
+    )
+
+    before = len(df)
+    df = df[valid_sr]
+    print("📐 Removed SR logic issue rows:", before - len(df))
+
+# =====================================================
+# 7️⃣ FINAL CLEAN
+# =====================================================
+df = df.drop(columns=["ret_1d"], errors="ignore")
+df = df.sort_values(["Symbol","Tanggal"]).reset_index(drop=True)
+
+# =====================================================
+# FINAL SUMMARY
+# =====================================================
+print("\n" + "="*70)
+print("📊 FINAL CLEAN SUMMARY")
+print("="*70)
+
+print("Rows:", f"{len(df):,}")
+print("Stocks:", df["Symbol"].nunique())
+print("Date range:", df["Tanggal"].min(), "→", df["Tanggal"].max())
+
+print("\n🏦 Bandar Distribution")
+if "Bandar" in df.columns:
+    print(df["Bandar"].value_counts(normalize=True).round(3))
+
+print("\n📊 CLOSE STATS")
 print(df["Close"].describe())
 
-print("\n📊 VOLUME")
+print("\n📊 VOLUME STATS")
 print(df["Volume"].describe())
 
-# =====================================================
-# 9. TOP SAHAM PALING AKTIF
-# =====================================================
-print("\n🔥 TOP 10 SAHAM PALING SERING MUNCUL")
+print("\n🔥 TOP 10 AKTIF")
 print(df["Symbol"].value_counts().head(10))
 
+print("\n🔍 RANDOM SAMPLE")
+print(df.sample(min(5, len(df)), random_state=42))
+
+print("\n" + "="*70)
+print("✅ CLEAN DATA READY FOR FEATURE ENGINEERING")
+print("="*70)
+
 # =====================================================
-# 10. SAMPLE DATA (AMAN)
+# SAVE CLEAN DATA
 # =====================================================
-print("\n🔍 SAMPLE DATA RANDOM")
-print(df.sample(5, random_state=42))
+df.to_parquet(OUTPUT_PATH, index=False)
+
+print("\n💾 Saved to:", OUTPUT_PATH)
