@@ -4,3 +4,4 @@ numpy
 mplfinance
 pyarrow
 joblib
+scikit-learn
