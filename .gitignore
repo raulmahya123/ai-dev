@@ -12,10 +12,6 @@ venv/
 # Streamlit
 .streamlit/
 
-# Data
-processed/
-data/
-
 # OS
 .DS_Store
 Thumbs.db
